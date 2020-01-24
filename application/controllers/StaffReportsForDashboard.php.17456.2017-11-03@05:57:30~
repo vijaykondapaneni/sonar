@@ -1,0 +1,1806 @@
+<?php
+/* 
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+defined('BASEPATH') OR exit('No direct script access allowed');
+
+class staffReportsForDashboard extends CI_Controller
+{
+    
+    // Define constant as per value;
+    CONST INSERTED = 0;
+    CONST UPDATED = 1;
+    CONST RPCTBASEDONSALON = 234;
+
+
+    public $salonAccountId;
+    public $startDate;
+    public $endDate;
+    
+    public $staffCalcData;
+    
+    public $currentDate;
+    
+    private $salonId;
+    private $salonsInfo;
+    private $salonInfo;
+    private $dayRangeType; 
+    
+    private $__insideConfigArr;
+    
+    public  $colorFieldsArr = array('color','highlight','Retouch','Hi-Lites','Lo-Lites','Minking','Foils','Virgin','Single Process','Crown Highlight','Partial Highlight','Double Process','Glaze','Base Softening','Highlights','Frosting','Balayage','Special Effects','Colors','Coloring','Chemical','Hilite','Hilites','Hilight','High','Perm','Relaxer','Color Retouch','Full Highlight','Custom Color','Permanent Wave');
+        
+    public  $colorLikeStr =  '';
+    
+    
+    
+    function __construct()
+    {
+        parent::__construct();
+        $this->load->model('Common_model');
+        $this->load->model('DashboardOwner_model');
+        $this->DB_ReadOnly = $this->load->database('read_only', TRUE);
+    }
+    
+    /**
+     * Default Index Fn
+     */    
+    public function index(){ print "Test";}
+    
+    /**
+     * 
+     * @param type $dayRangeType
+     * @param type $s
+     * @param type $e
+     */
+    public function __getStartEndDate($dayRangeType, $s = '', $e = '')
+    {
+        $this->dayRangeType =  $dayRangeType;
+        switch ($this->dayRangeType) {
+                        case TODAY:
+                                    $this->startDate =  $this->currentDate;
+                                    $this->endDate   =  $this->currentDate;
+                            break;
+                        case LASTWEEK:
+                                 if(isset($this->salonInfo['salon_info']["salon_start_day_of_week"]) && !empty($this->salonInfo['salon_info']["salon_start_day_of_week"]))
+                                    {
+                                        $lastDayOfTheWeek =  $this->salonInfo['salon_info']["salon_start_day_of_week"];
+                                        $this->startDate = getDateFn(strtotime('last '.$lastDayOfTheWeek));
+                                        $this->endDate = getDateFn(strtotime($this->startDate.' +6 days'));
+                                    }
+                                    else
+                                    {
+                                        $this->startDate = getDateFn(strtotime('-7 days'));
+                                        $this->endDate = getDateFn(strtotime('-1 days'));
+                                    }   
+                            break;
+                        case LASTMONTH:
+                                    $this->startDate = getDateFn(strtotime("first day of last month"));
+                                    $this->endDate = getDateFn(strtotime("last day of last month"));
+                            break;
+                        case MONTHLY:
+                                    $this->startDate = getDateFn(strtotime("first day of this month"));
+                                    $this->endDate = $this->currentDate;
+                            break;
+                        case LAST90DAYS:
+                                   
+                                    $LastMonthFirst = getDateFn(strtotime("first day of last month"));
+                                    $this->startDate = getDateFn(strtotime($LastMonthFirst. " -2 months"));
+                                    $this->endDate = getDateFn(strtotime("last day of last month"));
+                            break;
+                        case YEARLY:
+                                   
+                                    $this->startDate = getDateFn(strtotime('first day of January '.date('Y')));
+                                    $this->endDate = $this->currentDate;
+                            break;
+                        case CUSTOMDATE:
+                                    $this->startDate = $s;
+                                    $this->endDate = $e;
+                            break;
+                            default:
+                                    
+                                $this->startDate =  $this->currentDate;
+                                $this->endDate   =  $this->currentDate;
+                            break;
+                    }
+    }
+    
+    
+    private function __getInsideSqlQueryFn($salonAccountNo, $temp)
+    {
+        //TO GET SERVICES INVOICES AND CLIENT IDS
+        $whereServiceInvoiceAndClientIdConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate,'lrefund' => 'false');
+        
+        $serviceSalesInvoicesAndClientIds = $this->DB_ReadOnly->select('count(DISTINCT cinvoiceno) as invoice_count,count(DISTINCT iclientid) as unique_client_count')
+            ->get_where(MILL_SERVICE_SALES,$whereServiceInvoiceAndClientIdConditions)
+            ->row_array();
+
+       // pa($this->db->last_query(),'invoice_count_array',false);    
+      //  pa($serviceSalesInvoicesAndClientIds,'invoice_count',false);    
+                
+        $this->__insideConfigArr['serviceSalesInvoicesAndClientIds'] = !empty($serviceSalesInvoicesAndClientIds) ? $serviceSalesInvoicesAndClientIds : array();
+         
+        
+       //TO GET SERVICE SALES INVOICES AND CLIENTIDS WHOSE PREBOOK IS TRUE
+        $whereServiceInvoiceAndClientIdPrebookConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate,'lrefund' => 'false','lprebook' =>'true');
+        $serviceSalesInvoicesAndClientIdsWithPrebookTrue = $this->DB_ReadOnly->select('count(DISTINCT cinvoiceno) as invoice_count,count(DISTINCT iclientid) as unique_client_count')
+            ->get_where(MILL_SERVICE_SALES,$whereServiceInvoiceAndClientIdPrebookConditions)
+            ->row_array();
+         
+        $this->__insideConfigArr['serviceSalesInvoicesAndClientIdsPrebookTrue'] = !empty($serviceSalesInvoicesAndClientIdsWithPrebookTrue) ? $serviceSalesInvoicesAndClientIdsWithPrebookTrue : array();
+        
+                //pa($this->db->last_query(),'service invioice and clientids with prebook'); 
+                
+        
+        // appts.EmployeeName = "'.$temp["staff_name"].'" and 
+        $sql_get_total_clients_from_appts =  $this->DB_ReadOnly->query('SELECT count(DISTINCT client.ClientId) as total_clients_count FROM 
+                    '.MILL_CLIENTS_TABLE.' client 
+                    join '.MILL_PAST_APPTS_TABLE.' appts on appts.ClientId=client.ClientId 
+                    WHERE 
+                    appts.iempid = "'.$temp["staff_iid"].'" and 
+                    appts.AccountNo = "'.$salonAccountNo.'" and 
+                    appts.SlcStatus != "Deleted" and 
+                    client.AccountNo = "'.$salonAccountNo.'" and 
+                    date(appts.AppointmentDate) >= "'.$temp["start_date"].'" and 
+                    date(appts.AppointmentDate) <= "'.$temp["end_date"].'"')->row_array();
+        // pa($this->db->last_query(), '$sql_get_total_clients_from_appts' );      
+        
+        $this->__insideConfigArr['total_clients_count'] = ($sql_get_total_clients_from_appts['total_clients_count'])? $sql_get_total_clients_from_appts['total_clients_count'] : 0;
+        
+        /**
+        * GETTING UNIQUE SERVICE INVIOCE FR MILL_SERVICE_SALES
+        */
+        $serviceSalesCliendId = $this->DB_ReadOnly->select('DISTINCT(iclientid) as service_client_ids')
+                                        ->get_where(MILL_SERVICE_SALES, array('account_no' =>$salonAccountNo , 'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))
+                                        ->result_array();
+        $this->__insideConfigArr['uniqueServiceSalesClientIdArr'] = ($serviceSalesCliendId)? array_column($serviceSalesCliendId, "service_client_ids") : array();
+        // pa($this->db->last_query(), '$serviceSalesInvoiceNo' );      
+        
+        /**
+        *  GETTING UNIQUE SERVICE INVIOCE FR MILL_PRODUCT_SALES
+        */
+        $productSalesClientId = $this->DB_ReadOnly->select('DISTINCT(iclientid) as retail_client_ids')     
+                                        ->get_where(MILL_PRODUCT_SALES, array('account_no' =>$salonAccountNo , 'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))
+                                        ->result_array();
+        $this->__insideConfigArr['uniqueProductSalesCliendIdArr'] = ($productSalesClientId)? array_column($productSalesClientId, "retail_client_ids") : array();
+        //pa($this->db->last_query(), '$productSalesInvoiceNo' );               
+        
+        /**
+        * CLIENTS SERVICED or SERVED
+        */
+        $getStaffUniqueWorkedDates =  $this->DB_ReadOnly->select('tdatetime')
+                                                ->group_by('tdatetime')
+                                                ->get_where(MILL_SERVICE_SALES, array('account_no' =>$salonAccountNo , 'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))->result_array();        $this->__insideConfigArr['uniqueStaffWorkDatesArr'] = ($getStaffUniqueWorkedDates)? array_column($getStaffUniqueWorkedDates, "tdatetime") : array();
+       // pa($this->db->last_query(), '$getStaffUniqueWorkedDates' );
+                                                
+        //RUCT Calculation
+        $totalProductQuantitySalesArr =  $this->DB_ReadOnly->select_sum('nquantity')
+                                         ->get_where(MILL_PRODUCT_SALES, array('account_no' =>$salonAccountNo ,'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))->row_array();
+        $this->__insideConfigArr['totalProductQuantitySales'] = ($totalProductQuantitySalesArr['nquantity'])? $totalProductQuantitySalesArr['nquantity'] : 0;                                        
+       // pa($this->db->last_query(), '$totalProductQuantitySalesArr' );
+        
+        
+        //GET UNIQUE CLIENT COUNT BY DAY
+        $getUniqueClientIdsCountGroupByDatesArr =  $this->DB_ReadOnly->select('DISTINCT (iclientid) as unique_client_count,tdatetime')
+                                                        // ->group_by('tdatetime')
+                                                         ->get_where(MILL_SERVICE_SALES, array('account_no' =>$salonAccountNo , 'iempid' =>$temp["staff_iid"], 'tdatetime >=' => $temp["start_date"], 'tdatetime <=' => $temp["end_date"],'lrefund' => 'false'))
+                                                         ->result_array();
+        //pa($this->db->last_query(),'$getUniqueClientIdsCountGroupByDates');
+        
+                
+        $this->__insideConfigArr['getUniqueClientIdsCountGroupByDatesArr']['tempArr'] = ($getUniqueClientIdsCountGroupByDatesArr)? $getUniqueClientIdsCountGroupByDatesArr : array();                           
+                                                
+        //%BOOKED
+        /*$total_hours_booked_query = $this->DB_ReadOnly->query('SELECT (SUM( Nstartlen ) + SUM( Ngaplen ) + SUM( Nfinishlen )) AS totalhours FROM 
+                '.MILL_PAST_APPTS_TABLE.' 
+                WHERE 
+                EmployeeName = "'.$temp["staff_name"].'" and 
+                AccountNo = "'.$salonAccountNo.'" and 
+                SlcStatus != "Deleted" and 
+                ClientId !=  "-999" and 
+                date(AppointmentDate) >= "'.$temp["start_date"].'" and 
+                date(AppointmentDate) <= "'.$temp["end_date"].'"')->row_array();*/
+
+        $total_hours_booked_query = $this->DB_ReadOnly->query('SELECT (SUM( Nstartlen ) + SUM( Ngaplen ) + SUM( Nfinishlen )) AS totalhours FROM 
+        '.MILL_PAST_APPTS_TABLE.' 
+        WHERE 
+        iempid = "'.$temp["staff_iid"].'" and 
+        AccountNo = "'.$salonAccountNo.'" and 
+        SlcStatus != "Deleted" and 
+        ClientId !=  "-999" and 
+        date(AppointmentDate) >= "'.$temp["start_date"].'" and 
+        date(AppointmentDate) <= "'.$temp["end_date"].'"')->row_array();
+        
+        $this->__insideConfigArr['totalHoursBookedForSalon'] = (isset($total_hours_booked_query['totalhours']) && !empty($total_hours_booked_query['totalhours'])) ? $total_hours_booked_query['totalhours'] : 0 ;
+        
+        $total_scheduled_hours = $this->DB_ReadOnly->select_sum('nhours')
+                                          ->get_where(MILL_EMPLOYEE_SCHEDULE_HOURS, array('account_no' =>$salonAccountNo , 'start_date >=' =>$temp["start_date"], 'end_date <=' =>$temp["end_date"],'cworktype' => 'Work Time','dayRangeType' => 'Monthly','iempid' => $temp["staff_iid"]))
+                                          ->row_array();
+        $this->__insideConfigArr['totalScheduledHours'] = (isset($total_scheduled_hours['hours']) && !empty($total_scheduled_hours['hours'])) ? $total_scheduled_hours['hours'] : 0 ;
+        
+        
+        
+        /**
+        * GETTING UNIQUE ClientId  FR MILL_SERVICE_SALES
+        */
+        $serviceSalesClientIds = $this->DB_ReadOnly->select('DISTINCT(iclientid) as service_client_ids')
+                                        ->get_where(MILL_SERVICE_SALES, array('account_no' =>$salonAccountNo , 'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))
+                                        ->result_array();
+        $this->__insideConfigArr['uniqueServiceSalesClientIdsNoArr'] = ($serviceSalesClientIds)? array_column($serviceSalesClientIds, "service_client_ids") : array();
+        //pa($this->db->last_query(), 'uniqueServiceSalesClientIdsNoArr' );    
+         
+        /**
+        *  GETTING UNIQUE ClientId FR MILL_PRODUCT_SALES
+        */
+        $productSalesClientIds = $this->DB_ReadOnly->select('DISTINCT(iclientid) as retail_client_ids') 
+                                        ->get_where(MILL_PRODUCT_SALES, array('account_no' =>$salonAccountNo , 'tdatetime >=' =>$temp["start_date"], 'tdatetime <=' =>$temp["end_date"],'lrefund' => 'false', 'iempid' =>$temp["staff_iid"]))
+                                        ->result_array();
+        $this->__insideConfigArr['uniqueProductSalesClientIdsNoArr'] = ($productSalesClientIds)? array_column($productSalesClientIds, "retail_client_ids") : array();
+        //pa($this->db->last_query(), 'uniqueProductSalesClientIdsNoArr' );    
+        
+       //appts.EmployeeName = "'.$temp["staff_name"].'" and 
+        
+        //GET NEW SERVICED CLIENT IDS FROM APPOINTMENTS
+        /*$sql_get_new_clients_from_appts = $this->db->query('SELECT count(DISTINCT client.ClientId) as new_client_count FROM 
+            '.MILL_CLIENTS_TABLE.' client 
+            join '.MILL_PAST_APPTS_TABLE.' appts on appts.ClientId=client.ClientId 
+            WHERE 
+            appts.iempid = "'.$temp["staff_iid"].'" and 
+            appts.AccountNo = "'.$salonAccountNo.'" and 
+            appts.SlcStatus != 2 and 
+            client.AccountNo = "'.$salonAccountNo.'" and 
+            date(appts.AppointmentDate) >= "'.$this->startDate.'" and 
+            date(appts.AppointmentDate) <= "'.$this->endDate.'" and 
+            date(client.clientFirstVistedDate) >= "'.$this->startDate.'" and 
+            date(client.clientFirstVistedDate) <= "'.$this->endDate.'" and appts.ClientId !="-999"')->row_array();
+
+       // pa($this->db->last_query(),'new_guest_qty');
+        //pa($sql_get_new_clients_from_appts,'new_guest');*/
+        // new code
+        $clientscount_data['start_date'] = $this->startDate;
+        $clientscount_data['end_date'] = $this->endDate;
+        $clientscount_data['iempid'] = $temp["staff_iid"];
+        $clientscount_data['salonAccountNo'] = $salonAccountNo;
+        //pa($clientscount_data);          
+        $new_guest = $this->DashboardOwner_model
+                          ->getNewGuestCountStaff($clientscount_data);
+        //pa($new_guest);                  
+        //pa($this->db->last_query(),'new_guest_qty');
+       // pa($resultAssocArr_Lastyear,'new_guest');
+
+
+                
+        $this->__insideConfigArr['new_guest_qty'] = $new_guest;            
+            
+        //GET REPEATED SERVICED CLIENTS IDS FROM APPOINTMENTS
+       /* $sql_get_repeated_clients_from_appts = $this->db->query('SELECT count(DISTINCT client.ClientId) as repeated_client_count FROM 
+                    '.MILL_CLIENTS_TABLE.' client 
+                    join '.MILL_PAST_APPTS_TABLE.' appts on appts.ClientId=client.ClientId 
+                    WHERE 
+                    appts.iempid = "'.$temp["staff_iid"].'" and 
+                    appts.AccountNo = "'.$salonAccountNo.'" and 
+                    appts.SlcStatus != 2 and 
+                    client.AccountNo = "'.$salonAccountNo.'" and 
+                    date(appts.AppointmentDate) >= "'.$this->startDate.'" and 
+                    date(appts.AppointmentDate) <= "'.$this->endDate.'" and client.ClientId!="-999" and
+                    client.clientFirstVistedDate != client.clientLastVistedDate')->row_array();
+        
+            pa($this->db->last_query(),'repeated_client_count');
+            pa($sql_get_repeated_clients_from_appts);*/
+            // repeat guest new code
+            $total_guest_qty = $this->DashboardOwner_model->getTotalClientsCountStaff($clientscount_data);
+            $repeated_guest_qty = $total_guest_qty-$new_guest;
+            if($repeated_guest_qty<0){
+                $repeated_guest_qty = 0;
+                $errors['code'] = 'Repeated Guest Qty Error -- Staff Dashboard';
+                $error_message= "<p>".$salonAccountNo."</p>";
+                $error_message.= "<p>Day Range Type".$dayRangeType."</p>";
+                $error_message.= "<p>Total Guest Qty".$total_guest_qty."</p>";
+                $error_message.= "<p>Is Getting Negative Value</p>";
+                $errors['message'] = $error_message;
+                $errors['tablename'] = 'mill_owner_report_calculations_cron';
+                send_mail_database_error($errors);
+            }
+          //  pa($repeated_guest_qty);
+
+       //     pa($sql_get_repeated_clients_from_appts['repeated_client_count']);
+            
+             $this->__insideConfigArr['repeated_guest_qty'] = $repeated_guest_qty;                   
+        return $this->__insideConfigArr;
+    }
+    
+    /**
+    * Get Future And Unique Client Count
+    */
+    private function __getFutureAndUniqueClientCount()
+    {
+                $tempUniqueClientArr = array();
+                foreach($this->__insideConfigArr['getUniqueClientIdsCountGroupByDatesArr']['tempArr'] as $arr)
+                {
+                    $tempUniqueClientArr[$arr['tdatetime']][] = $arr['unique_client_count'];
+                }
+                
+                unset($this->__insideConfigArr['getUniqueClientIdsCountGroupByDatesArr']['tempArr']);
+                
+                $this->__insideConfigArr['getUniqueClientIdsCountGroupByDatesArr'] = $tempUniqueClientArr;
+                
+                $begin = new DateTime($this->startDate);
+                $end = new DateTime($this->endDate);
+                $end = $end->modify( '+1 day' );
+                $interval = new DateInterval('P1D');
+                $daterange = new DatePeriod($begin, $interval ,$end);
+              
+                foreach($daterange as $datess){
+                    $getUniqueClientIdsCountGroupByDatesArr = $this->__insideConfigArr['getUniqueClientIdsCountGroupByDatesArr'];
+                    
+                    $uniqueClientIdsJoined =  isset($getUniqueClientIdsCountGroupByDatesArr[$datess->format("Y-m-d")]) ? join(',',$getUniqueClientIdsCountGroupByDatesArr[$datess->format("Y-m-d")]):'';
+                   
+                    $this->__insideConfigArr['uniqueClientCountDayWise'][$datess->format("Y-m-d")] =  isset($getUniqueClientIdsCountGroupByDatesArr[$datess->format("Y-m-d")]) ? count($getUniqueClientIdsCountGroupByDatesArr[$datess->format("Y-m-d")]): 0;
+                    $plusFourMonthsDate = date('Y-m-d',strtotime($datess->format("Y-m-d") . "+120 days"));
+                    
+                    if(!empty($uniqueClientIdsJoined)){
+                        $sql_get_clients_serviced_count = $this->DB_ReadOnly->query("SELECT count(DISTINCT ClientId) as client_count FROM 
+                        ".MILL_APPTS_TABLE."  
+                        WHERE 
+                        AccountNo = '".$this->salonAccountId."' and 
+                        SlcStatus != 'Deleted' and 
+                        str_to_date(AppointmentDate, '%m/%d/%Y') >= '".$datess->format("Y-m-d")."' and 
+                        str_to_date(AppointmentDate, '%m/%d/%Y') <= '".$plusFourMonthsDate."' and 
+                        DATE(  `MillCreatedDate` ) <=  '".$datess->format("Y-m-d")."' and 
+                        LPrebook =  'true' and 
+                        ClientId IN ($uniqueClientIdsJoined)")->row_array();
+                        
+                        $allClientCount[$datess->format("Y-m-d")] = $sql_get_clients_serviced_count["client_count"];
+                    }
+                    else $allClientCount[$datess->format("Y-m-d")] = 0;
+                    
+                }
+               
+                $this->__insideConfigArr['totalFutureClientsCountSum'] = array_sum($allClientCount);
+    }
+    
+    
+    public function __make_like_conditions ($fields, array $query)
+        {
+            $likes = array();
+            foreach ($query as $match) {
+                $likes[] = "$fields LIKE '%$match%'";
+            }
+            return '('.implode(' || ', $likes).')';
+        }
+        
+    public function getRetailPerServiceReports($temp)
+        {
+            $this->staffCalcData = array();
+            $dataArray = array();
+            
+            //pa($temp,'OBJ', true);
+            
+            //if(!empty($temp["salon_id"]) && !empty($temp["staff_iid"]) && !empty($temp["staff_iids"]) && !empty($temp["start_date"]) && !empty($temp["end_date"]))
+            if(!empty($temp["salon_id"]) && !empty($temp["staff_iid"]) && !empty($temp["start_date"]) && !empty($temp["end_date"]))
+            {
+                $salonDetailsArr = $this->Common_model
+                                   ->getMillSdkConfigDetailsBy($temp["salon_id"])
+                                   ->row_array();
+                
+                $salonAccountNo = isset($salonDetailsArr['salon_account_id']) ? $salonDetailsArr['salon_account_id']: '';
+                $this->salonAccountId = $salonAccountNo;
+                
+                $this->__getInsideSqlQueryFn($salonAccountNo, $temp);
+                
+                
+                //TO GET EMPLOYEE DATA 
+                $whereEmployeeCondition = array('account_no' => $salonAccountNo,'iid' => $temp["staff_iid"]);
+                $getEmployeeDetailsArr = $this->Common_model->getEmployeeListing($whereEmployeeCondition)->row_array();
+                
+                //TO GET ALL SERVICE SALES DETAILS
+                $whereTotalServiceConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate);
+                $getTotalServiceSales = $this->DashboardOwner_model
+                                        ->getTotalServiceSales($whereTotalServiceConditions)
+                                        ->row_array();
+               // pa($this->db->last_query(),'TOTAL service');
+                
+                
+                $this->staffCalcData['total_service_sales'] = (!empty($getTotalServiceSales['nprice']) && $getTotalServiceSales['nprice'] > 0 ) ? $this->Common_model->appCloudNumberFormat($getTotalServiceSales['nprice'],2)  : '0.00';
+                
+                
+               $this->staffCalcData['total_serviceQty'] = (!empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['invoice_count'])) ? $this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["invoice_count"]  : '0.00' ;
+                
+                
+
+                // Total Color Service Sales
+                $whereColorServiceSalesConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate);
+                $this->colorLikeStr = $this->__make_like_conditions('cservicedescription', $this->colorFieldsArr);
+                
+                $totalColorServiceSales = $this->Common_model
+                                        ->getStaffTotalColorServiceSales($whereColorServiceSalesConditions,$this->colorLikeStr)
+                                        ->row_array();
+                
+               // pa($this->db->last_query(),'color service');
+                
+                //TO GET TOTAL RETAIL SALES DETAILS
+                $whereProductSalesConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate);
+                $getTotalProductSales = $this->DashboardOwner_model
+                                        ->getTotalProductSales($whereProductSalesConditions)
+                                        ->row_array();
+                
+                //pa($this->db->last_query(),'total retail service');
+                
+                $this->staffCalcData['total_retail_price'] = (!empty($getTotalProductSales['nprice']) && $getTotalProductSales['nprice'] > 0 ) ? $this->Common_model->appCloudNumberFormat($getTotalProductSales['nprice'],2)  : '0.00';
+                
+                $this->staffCalcData['retail_units'] = (!empty($getTotalProductSales['nquantity'])) ? $getTotalProductSales['nquantity'] : 0;
+                     
+                $this->staffCalcData['total_revenue'] = (!empty($getTotalServiceSales['nprice']) || !empty($getTotalProductSales['nprice'])) ? $this->Common_model->appCloudNumberFormat($getTotalServiceSales["nprice"]+$getTotalProductSales["nprice"],2)  : 0;
+              
+                
+                //TO GET RETAIL SALES Invoices and clientids
+                $whereProductInviousCliendIdsConditions = array('account_no' => $salonAccountNo , 'iempid' =>$temp["staff_iid"] ,'tdatetime >=' =>$this->startDate, 'tdatetime <=' =>$this->endDate,'lrefund' => 'false');
+                $getProductSalesInvoicesAndClientIds = $this->DashboardOwner_model
+                                        ->getProductInvoicesClientIdsCount($whereProductInviousCliendIdsConditions)
+                                        ->row_array();
+                
+               // pa($this->db->last_query(),'retail service invoice and client');
+               
+                $this->staffCalcData['totalClientRetailVisits'] = (!empty($getProductSalesInvoicesAndClientIds['unique_client_count'])) ? $getProductSalesInvoicesAndClientIds["unique_client_count"]  : 0 ;
+                
+                $this->staffCalcData['avgServiceTicket'] = (!empty($getTotalServiceSales['nprice']) && !empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['invoice_count'])) ? $this->Common_model->appCloudNumberFormat($getTotalServiceSales["nprice"]/$this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["invoice_count"],2)  : '0.00';
+                
+                $this->staffCalcData['totalClientServiceVisits'] = (!empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['unique_client_count'])) ? $this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["unique_client_count"]  : 0 ;
+                
+                $this->staffCalcData['totalClientServiceTickets'] = (!empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['invoice_count'])) ? $this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["invoice_count"]  : 0 ;
+                
+                
+                
+                $this->staffCalcData['totalTickets'] = (!empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['invoice_count'])) ? $this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["invoice_count"]  : 0 ;
+
+                $this->staffCalcData['avgRetailTicket'] = (!empty($getTotalProductSales['nprice']) && !empty($getProductSalesInvoicesAndClientIds['invoice_count'])) ? $this->Common_model->appCloudNumberFormat($getTotalProductSales["nprice"]/$getProductSalesInvoicesAndClientIds["invoice_count"],2)  : '0.00';
+                
+                //RPST
+                $this->staffCalcData['RPST'] = (!empty($getTotalProductSales['nprice']) && !empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['invoice_count'])) ? $this->Common_model->appCloudNumberFormat($getTotalProductSales["nprice"]/$this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["invoice_count"],2)  : '0.00';
+                
+                
+                //Get total unique clients
+                $serviceClientInvoiceCount = count($this->__insideConfigArr['uniqueServiceSalesClientIdArr']);
+                    
+                //GET TOTAL CLIENTS TICKET BY THE STYLIST
+                //Get CLient TICKETS
+                $retailClientInvoiceCount = count($this->__insideConfigArr['uniqueProductSalesCliendIdArr']);
+                
+
+                $commonClientsInvoiceCount = count(array_intersect($this->__insideConfigArr['uniqueServiceSalesClientIdArr'], $this->__insideConfigArr['uniqueProductSalesCliendIdArr']));
+                
+                
+                $totalUniqueClients = ($serviceClientInvoiceCount - $commonClientsInvoiceCount) + ($retailClientInvoiceCount - $commonClientsInvoiceCount) + $commonClientsInvoiceCount; 
+                
+                //RPCT STARTS
+                $salonDetails = $this->Common_model->getMillSdkConfigDetailsBy($temp["salon_id"])->row_array();
+                $rpct_type = $salonDetails['rpct_type']; 
+                /*if(!empty($temp["salon_id"]) && $temp["salon_id"] == staffReportsForDashboard::RPCTBASEDONSALON)*/
+                if($rpct_type ==2)
+                {
+                        $this->staffCalcData['RPCT'] = (!empty($getTotalProductSales['nprice']) && !empty($totalUniqueClients)) ? $this->Common_model->appCludRoundCalcWithOutMultiplication($getTotalProductSales['nprice'],$totalUniqueClients,2)  : '0.00';
+                         
+                }
+                else {
+                        $this->staffCalcData['RPCT'] = (!empty($getTotalProductSales['nprice']) && !empty($getProductSalesInvoicesAndClientIds['invoice_count'])) ? $this->Common_model->appCludRoundCalcWithOutMultiplication($getTotalProductSales["nprice"],$getProductSalesInvoicesAndClientIds["invoice_count"],2)  : '0.00';
+                    
+                }
+                
+              
+                 //RPRT STARTS
+                $this->staffCalcData['RPRT'] = (!empty($getTotalProductSales['nprice']) && !empty($getProductSalesInvoicesAndClientIds['invoice_count'])) ? $this->Common_model->appCloudNumberFormat($getTotalProductSales["nprice"]/$getProductSalesInvoicesAndClientIds["invoice_count"],2)  : '0.00';
+                
+                 //product_average STARTS
+                $this->staffCalcData['product_average'] = (!empty($getTotalProductSales['nprice']) && !empty($getProductSalesInvoicesAndClientIds['invoice_count'])) ? $this->Common_model->appCloudNumberFormat($getTotalProductSales["nprice"]/$getProductSalesInvoicesAndClientIds["invoice_count"],2)  : 0;
+                
+                
+                 //%PREBOOK STARTS
+                $serviceSalesInvoicesAndClientIdsPrebookTrue = $this->__insideConfigArr['serviceSalesInvoicesAndClientIdsPrebookTrue'];
+                $this->staffCalcData['prebook_percentage'] = (!empty($serviceSalesInvoicesAndClientIdsPrebookTrue['unique_client_count']) && !empty($this->__insideConfigArr['serviceSalesInvoicesAndClientIds']['unique_client_count'])) ? $this->Common_model->appCloudNumberFormat(($serviceSalesInvoicesAndClientIdsPrebookTrue["unique_client_count"]/$this->__insideConfigArr['serviceSalesInvoicesAndClientIds']["unique_client_count"])*100,2)  : '0.00';
+                
+                 //%COLOR STARTS
+                $this->staffCalcData['color_percentage'] = (!empty($getTotalServiceSales['nprice']) && !empty($totalColorServiceSales['nprice'])) ? $this->Common_model->appCloudNumberFormat(($totalColorServiceSales["nprice"]/$getTotalServiceSales["nprice"])*100,2)  : '0.00';
+                
+                
+                //GET TOTAL CLIENTS FROM APPOINTMENTS FOR MONTH
+                $this->staffCalcData['total_guests_for_month'] = $this->__insideConfigArr['total_clients_count'];
+                
+                
+               
+               
+                //GET TOTAL WORKED DAYS COUNT FOR STAYLIST
+                $totalWorkedDaysCount =  count($this->__insideConfigArr['uniqueStaffWorkDatesArr']);
+                
+                //CLIENTS SERVICED or SERVED
+                $this->staffCalcData['client_served'] = (($totalUniqueClients != 0) && ($totalWorkedDaysCount != 0)) ? $this->Common_model->appCloudNumberFormat(($totalUniqueClients/$totalWorkedDaysCount),2)  : '0.00';
+                    
+            
+                
+                //RUCT Calculation
+                $totalProductQuantitySales = $this->__insideConfigArr['totalProductQuantitySales'];
+                $this->staffCalcData['RUCT'] = (($totalUniqueClients != 0) && ($totalProductQuantitySales != 0)) ? $this->Common_model->appCloudNumberFormat(($totalProductQuantitySales/$totalUniqueClients),2)  : '0.00';
+
+                
+                //REBOOK PERCENTAGE CALCULATION  
+                $this->__getFutureAndUniqueClientCount();
+                $totalClientsCount = array_sum($this->__insideConfigArr['uniqueClientCountDayWise']);
+                
+                  $this->staffCalcData['rebook_percentage'] = (($totalClientsCount > 0) && ($this->__insideConfigArr['totalFutureClientsCountSum'] > 0)) ? $this->Common_model->appCloudNumberFormat(($this->__insideConfigArr['totalFutureClientsCountSum']/$totalClientsCount)*100,2)  : '0.00';
+                
+                //%BOOKED
+                  
+                $this->staffCalcData['percentage_booked'] = (($this->__insideConfigArr['totalScheduledHours'] > 0) && ($this->__insideConfigArr['totalHoursBookedForSalon'] > 0)) ? $this->Common_model->appCloudNumberFormat(($this->__insideConfigArr['totalHoursBookedForSalon']/$this->__insideConfigArr['totalScheduledHours'])*100,2)  : '0.00';
+                
+                 
+                
+               //GET SEARVICE CLIENT IDS COUNT
+                $serviceClientIdsCount = (!empty($this->__insideConfigArr['uniqueServiceSalesClientIdsNoArr'])) ?                    
+                                            count($this->__insideConfigArr['uniqueServiceSalesClientIdsNoArr']): 0 ;
+                 
+                
+                //GET RETAIL CLIENT IDS COUNT
+                $retailClientIdsCount = count($this->__insideConfigArr['uniqueProductSalesClientIdsNoArr']);
+                
+                
+                $commonClientIdsCount = count(array_intersect($this->__insideConfigArr['uniqueServiceSalesClientIdsNoArr'], $this->__insideConfigArr['uniqueProductSalesClientIdsNoArr']));
+                
+                $totalUniqueClientsIds = ($serviceClientIdsCount - $commonClientIdsCount) + ($retailClientIdsCount - $commonClientIdsCount) + $commonClientIdsCount; 
+
+                //PERCENTAGE_OF_CLIENTS_BUYING_RETAIL
+                $this->staffCalcData['percentage_of_clients_buying_retail'] = (($totalUniqueClientsIds != 0) && ($retailClientIdsCount != 0)) ? $this->Common_model->appCloudNumberFormat(($retailClientIdsCount/$totalUniqueClientsIds)*100,2)  : '0.00';
+                //PERCENTAGE_OF_CLIENTS_BUYING_RETAIL
+               
+                
+                //GET TOTAL GUEST CLIENTS FROM APPOINTMENTS
+                $this->staffCalcData['new_guest_qty'] = $this->__insideConfigArr['new_guest_qty'];
+                
+                //GET REPEATED SERVICED CLIENTS IDS FROM APPOINTMENTS
+                $this->staffCalcData['repeated_guest_qty'] = $this->__insideConfigArr['repeated_guest_qty'];
+               
+            
+                //LEADER BOARD DATA for AVG Retail TICKET
+                $this->__leaderBoardAvgRetailTicket($temp);
+                
+                //LEADER BOARD DATA for AVG SERVICE TICKET
+                $this->__leaderBoardAvgServiceTicket($temp);
+               //LEADER BOARD DATA for PRE BOOK PERCENTAGE
+                $this->__leaderBoardPrebookPercentage($temp);
+               
+                //LEADER BOARD DATA for BOOK PERCENTAGE
+                $this->__leaderBoardBookPercentage($temp);
+                
+                //LEADER BOARD DATA for NEW CLIENT
+                $this->__leaderBoardNewClient($temp);
+                
+                //LEADER BOARD DATA for Total Retail Sales
+                $this->__leaderBoardTotalRetailSales($temp);
+                
+                //LEADER BOARD DATA for Total Service Sales
+                $this->__leaderBoardTotalServiceSales($temp);
+                
+                //Leader board Color percentage
+                $this->__leaderBoardColorPercentage($temp);
+               
+                //Leader board Rebook percentage
+                $this->__leaderBoardRebookPercentage($temp);
+                                
+                //RUCT LEADER BOARD STARTS
+                $this->__leaderBoardRUCT($temp);
+                
+                //PERCENTAGE OF CLIENTS BUYING RETAIL LEADER BOARD STARTS
+                $this->__leaderBoardClientRetailPercentage($temp);
+                
+                //RETAIL PER SERVICE PER CURRENT DAY OF NEWLY ADDED SERVICE AND RETAIL
+                $this->__leaderBoardRetailPerService($temp);
+               
+                //pa($this->staffCalcData,'$this->staffCalcData',TRUE);
+        }
+            else
+            {
+                //IF POST VALUES ARE EMPTY
+                
+            }
+        }
+    
+    /**
+     * 
+     * @param type $day
+     * @param type $para_salon_id
+     */
+    function setStaffDashboard($dayRangeType="Today", $salon_id="")
+        {
+            ini_set('memory_limit', '-1');   
+            $this->currentDate = getDateFn();
+            $this->salonsInfo = $this->Common_model->getAllSalons($salon_id);
+            if(isset($this->salonsInfo["mill_salons"]) && !empty($this->salonsInfo["mill_salons"]))
+            {
+                foreach($this->salonsInfo["mill_salons"] as $salonsData)
+                {
+                    pa('',"Salon Reports Cron Dashboard--".$dayRangeType. "--" .$salonsData['salon_id'].' ---['.$salonsData['salon_name']."]");
+                    $this->salonInfo['salon_info']["salon_start_day_of_week"] = $salonsData['salon_start_day_of_week'];
+                
+                    // GET START DATE AND END DATE AS PER PARAMETERS
+                    $this->__getStartEndDate($dayRangeType, '2017-03-01','2017-03-31');
+            
+                    //Get the all staff members by salon id
+                    $getAllStaff = $this->Common_model->getAllStaffMembersBySalon($salonsData["salon_id"]);
+                    
+                    pa($getAllStaff,'Staff');
+                     
+                    if(isset($getAllStaff["getAllStaff"]) && !empty($getAllStaff["getAllStaff"]))
+                    {
+                        foreach($getAllStaff["getAllStaff"] as $staffMembers)
+                        {
+                            /*$salonStaffIds = array();
+                            $salonStaffIds["salon_id"] = $salonsData["salon_id"];
+                            $salonStaffIds["staff_id"] = $staffMembers["staff_id"];
+
+                            $salonStaffResultArray  = $this->Common_model->getMillAppointmentAndSalonInfo($salonStaffIds);
+
+                            pa('','LoopStaff-----'.$salonStaffIds["staff_id"]);*/
+
+                            $temps = array();
+                            $temps['staff_id'] = isset($staffMembers["staff_id"])? $staffMembers["staff_id"] : '';
+                            $temps['staff_iid'] = isset($staffMembers["emp_iid"])? $staffMembers["emp_iid"] : 0;
+                            //$temps['staff_iids'] = isset($salonStaffResultArray["emp_iids"])? $salonStaffResultArray["emp_iids"] : '';
+                            //$temps['staff_name'] = isset($salonStaffResultArray["staff_name"])? $salonStaffResultArray["staff_name"] : '';
+                            $temps['salon_id'] = $salonsData["salon_id"];
+                            
+                            $temps['start_date'] = $this->startDate;
+                            $temps['end_date'] = $this->endDate;
+                            
+                            //$temps["checked_out_client_id"] = isset($salonStaffResultArray["checked_out_client_id"])? $salonStaffResultArray["checked_out_client_id"] : 0;
+                            
+                           // GET CALCULATE VALEUES AS PER FORMULAS 
+                            $this->getRetailPerServiceReports($temps);
+                        
+
+                            $this->staffCalcData["salon_id"] = $salonsData["salon_id"];
+                            $this->staffCalcData["staff_id"] = $staffMembers["staff_id"];
+                            
+                            $this->staffCalcData["start_date"] = $this->startDate;
+                            $this->staffCalcData["end_date"] = $this->endDate;
+                            $this->staffCalcData["dayRangeType"] = $this->dayRangeType;
+                            
+                            //DATA TO BE INSERTED OR UPDATED
+                            $reportsWhere = array('salon_id' => $salonsData["salon_id"], 'staff_id' => $staffMembers["staff_id"],'dayRangeType'=>$dayRangeType);
+                            $reportsDataForSalon =  $this->DB_ReadOnly->select('*')
+                                                            ->get_where(MILL_REPORT_CALCULATIONS_CRON,$reportsWhere)
+                                                            ->row_array();
+                            if($reportsDataForSalon===FALSE){
+                              $errors = $this->DB_ReadOnly->error();
+                              $errors['tablename'] = MILL_REPORT_CALCULATIONS_CRON;
+                              send_mail_database_error($errors);
+                            }                                
+                            
+                            //pa($this->db->last_query(),'',false);
+                            unset($this->staffCalcData['total_serviceQty'],$this->staffCalcData['total_revenue'],$this->staffCalcData['product_average'],$this->staffCalcData['totalClientServiceTickets']);
+                            
+                            //pa($this->staffCalcData,'befor insert', '');
+                            if(!empty($reportsDataForSalon))
+                            {
+                                $diff_array = array_diff_assoc($this->staffCalcData,$reportsDataForSalon);
+                                
+                                pa('',"Diff Array");
+                                                        
+                                if(empty($diff_array))
+                                {
+                                      continue; //SAME DATA FOUND, SO CONTINUe with the loop
+                                }
+                                else
+                                {
+                                    //Update REPORT
+                                    $this->staffCalcData["insert_status"] = staffReportsForDashboard::UPDATED;
+                                    $this->staffCalcData["updatedDate"] = date("Y-m-d H:i:s");
+                                    try {
+                                        
+                                        $this->db->where('id', $reportsDataForSalon["id"]);
+//                                      $this->db->where('salon_id', $salonStaffIds["salon_id"]);
+//                                      $this->db->where('staff_id', $salonStaffIds["staff_id"]);
+                                        $this->db->query('LOCK TABLE '.MILL_REPORT_CALCULATIONS_CRON.' WRITE');
+                                        $this->db->trans_begin();
+                                        $this->db->update(MILL_REPORT_CALCULATIONS_CRON, $this->staffCalcData);
+
+                                        //pa($this->db->last_query(),'Update SQL');
+                                        if ($this->db->trans_status() === FALSE)
+                                        {
+                                            $this->db->trans_rollback();
+                                        }
+                                        else
+                                        {
+                                            $this->db->trans_commit();
+                                        }
+                                        $this->db->query('UNLOCK TABLES');
+                                        echo "Reports Data updated Successfully."."<br>";
+                                    } catch (Exception $e) {
+                                        echo 'Reports Update failed: ' . $e->getMessage()."<br>";
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                //INSERT REPORT
+                                $this->staffCalcData["insert_status"] = staffReportsForDashboard::INSERTED;;
+                                $this->staffCalcData["insertedDate"] = date("Y-m-d H:i:s");
+                                $this->staffCalcData["updatedDate"] = date("Y-m-d H:i:s");
+                                
+                                try {
+                                    
+                                    $this->db->query('LOCK TABLE '.MILL_REPORT_CALCULATIONS_CRON.' WRITE');
+
+                                    $this->db->trans_begin();
+
+                                    $this->db->insert(MILL_REPORT_CALCULATIONS_CRON, $this->staffCalcData);
+                                    
+                                    if ($this->db->trans_status() === FALSE)
+                                    {
+                                        $this->db->trans_rollback();
+                                    }
+                                    else
+                                    {
+                                        $this->db->trans_commit();
+                                    }
+
+                                    $this->db->query('UNLOCK TABLES');
+                                    pa($this->db->last_query(),'INSERTSQL');
+                                    echo "Reports Data inserted Successfully."."<br>";
+                                } catch (Exception $e) {
+                                    echo 'Reports Insert failed: ' . $e->getMessage()."<br>";
+                                }
+                            }
+                        } //STAFF for loop ends.
+                    }
+                    else
+                    {
+                        echo "No Staff Available.";
+                    }
+                }
+            }
+            else
+            {
+                echo "No Salons Found.";
+            }
+        }
+    
+        
+        private function __getStaffImage($employeeId ='' , $salon_id = '')
+        {
+            if(!empty($employeeId) && !empty($salon_id)){
+                $staffWhereCondition = array('emp_iid' => $employeeId, 'account_no' => $salon_id, 'emp_iid != ' => 0);
+                $getStaffImage =  $this->DB_ReadOnly->select('image')
+                                                ->get_where(STAFF2_TABLE,$staffWhereCondition)
+                                                ->row_array();
+                
+              
+                return isset($getStaffImage['image']) ? $getStaffImage['image'] : '';
+            }
+            
+        }
+        
+        private function __leaderBoardAvgRetailTicket($temp)
+        {
+            //LEADER BOARD DATA for AVG RETAIL TICKET
+                $this->__insideConfigArr['avgretailticket'] = array();
+                $sql_get_service_invoice = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as invoice_count,emp.cfirstname,emp.clastname,emp.iid FROM ".MILL_PRODUCT_SALES." service 
+                    join ".MILL_EMPLOYEE_LISTING." emp on emp.iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' and 
+                    service.lrefund = 'false' GROUP BY service.iempid");
+                    $this->__insideConfigArr['avgretailticket']["service_invoice_count"] = $sql_get_service_invoice->result_array();
+
+                $sql_get_highest_retail = $this->DB_ReadOnly->query("SELECT count(DISTINCT retail.cinvoiceno) as invoice_count, sum(retail.nprice*retail.nquantity) as total_retail,emp.cfirstname,emp.clastname,emp.iid FROM ".MILL_PRODUCT_SALES." retail 
+                    join ".MILL_EMPLOYEE_LISTING." emp on emp.iid=retail.iempid 
+                    WHERE 
+                    retail.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    retail.tdatetime >= '".$temp["start_date"]."' and 
+                    retail.tdatetime <= '".$temp["end_date"]."' GROUP BY retail.iempid");
+                $this->__insideConfigArr['avgretailticket']["total_retail_sales"] = $sql_get_highest_retail->result_array();
+
+        
+                
+                //if(!empty($this->__insideConfigArr['avgretailticket']))
+                if(!empty($this->__insideConfigArr['avgretailticket']["service_invoice_count"]) && !empty($this->__insideConfigArr['avgretailticket']["total_retail_sales"]))
+                {
+                    if(COUNT($this->__insideConfigArr['avgretailticket']["service_invoice_count"]) > COUNT($this->__insideConfigArr['avgretailticket']["total_retail_sales"]))
+                    {
+                        foreach($this->__insideConfigArr['avgretailticket']["service_invoice_count"] as $key => $service_invoice_value)
+                        {
+                            
+                            $search_key = array_search($service_invoice_value["iid"], array_column($this->__insideConfigArr['avgretailticket']["total_retail_sales"], 'iid'));
+                            //echo $search_key;exit;
+
+                            if($search_key !== false)
+                            {
+                                if(isset($service_invoice_value["invoice_count"]) && isset($this->__insideConfigArr['avgretailticket']["total_retail_sales"][$search_key]["total_retail"]) && !empty($service_invoice_value["invoice_count"]) && !empty($this->__insideConfigArr['avgretailticket']["total_retail_sales"][$search_key]["total_retail"]))
+                                {
+                                    
+
+                                    $this->__insideConfigArr['avgretailticket']['RPCT_percent'][] = $this->__insideConfigArr['avgretailticket']["total_retail_sales"][$search_key]["total_retail"]/$service_invoice_value["invoice_count"];
+                                    $this->__insideConfigArr['avgretailticket']['iempname'][] = trim($service_invoice_value["cfirstname"]);
+                                    $this->__insideConfigArr['avgretailticket']['iid'][] = $service_invoice_value['iid'];
+                                }
+                            }
+                        }
+                    }
+                    elseif(COUNT($this->__insideConfigArr['avgretailticket']["total_retail_sales"]) > COUNT($this->__insideConfigArr['avgretailticket']["service_invoice_count"]))
+                    {
+                        foreach($this->__insideConfigArr['avgretailticket']["total_retail_sales"] as $key => $retail_invoice_value)
+                        {
+                            
+                            $search_key = array_search($retail_invoice_value["iid"], array_column($this->__insideConfigArr['avgretailticket']["service_invoice_count"], 'iid'));
+                            //echo $search_key;exit;
+
+                            if($search_key !== false)
+                            {
+                                if(isset($this->__insideConfigArr['avgretailticket']["service_invoice_count"][$search_key]["invoice_count"]) && isset($retail_invoice_value["total_retail"]) && !empty($this->__insideConfigArr['avgretailticket']["service_invoice_count"][$search_key]["invoice_count"]) && !empty($this->__insideConfigArr['avgretailticket']["total_retail"]))
+                                {
+                                    $this->__insideConfigArr['avgretailticket']['RPCT_percent'][] = $retail_invoice_value["total_retail"]/$this->__insideConfigArr['avgretailticket']["service_invoice_count"][$search_key]["invoice_count"];
+                                    $this->__insideConfigArr['avgretailticket']['iempname'][] = trim($retail_invoice_value["cfirstname"]);
+                                    $this->__insideConfigArr['avgretailticket']['iid'][] = $retail_invoice_value['iid'];
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+
+                        for($i=0;$i<count($this->__insideConfigArr['avgretailticket']["service_invoice_count"]);$i++)
+                        {
+                            //echo $i."<br>";
+                            //echo $prebookTrueCount["prebook_all_count"][$i]["unique_client_count"];exit;
+                            if(isset($this->__insideConfigArr['avgretailticket']["service_invoice_count"][$i]["invoice_count"]) && isset($this->__insideConfigArr['avgretailticket']["total_retail_sales"][$i]["total_retail"]) && !empty($this->__insideConfigArr['avgretailticket']["service_invoice_count"][$i]["invoice_count"]) && !empty($this->__insideConfigArr['avgretailticket']["total_retail_sales"][$i]["total_retail"]))
+                            {
+                                $this->__insideConfigArr['avgretailticket']['RPCT_percent'][] = $this->__insideConfigArr['avgretailticket']["total_retail_sales"][$i]["total_retail"]/$this->__insideConfigArr['avgretailticket']["service_invoice_count"][$i]["invoice_count"];
+                                $this->__insideConfigArr['avgretailticket']['iempname'][] = trim($this->__insideConfigArr['avgretailticket']["total_retail_sales"][$i]["cfirstname"]);
+                                $this->__insideConfigArr['avgretailticket']['iid'][] = $this->__insideConfigArr['avgretailticket']["total_retail_sales"][$i]['iid'];
+                            }
+                        }
+                    }
+                    
+                }   
+                    
+                if(isset($this->__insideConfigArr['avgretailticket']['RPCT_percent']) && !empty($this->__insideConfigArr['avgretailticket']['RPCT_percent']))
+                    {
+                        $high_key_value = array_search(max($this->__insideConfigArr['avgretailticket']['RPCT_percent']), $this->__insideConfigArr['avgretailticket']['RPCT_percent']);
+                        $this->staffCalcData["highest_avg_rpct_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['avgretailticket']['RPCT_percent'][$high_key_value],2);
+                        $this->staffCalcData["highest_avg_rpct_employee"] = $this->__insideConfigArr['avgretailticket']['iempname'][$high_key_value];
+                        $this->staffCalcData["highest_avg_rpct_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['avgretailticket']['iid'][$high_key_value], $this->salonAccountId);
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_avg_rpct_value"] = '0.00';
+                        $this->staffCalcData["highest_avg_rpct_employee"] = "";
+                        $this->staffCalcData["highest_avg_rpct_employee_image"] = "";
+                    }
+                
+        }  
+        
+        private function __leaderBoardAvgServiceTicket($temp)
+        {
+            //LEADER BOARD DATA for AVG SERVICE TICKET
+            $this->__insideConfigArr['avgserviceticket'] = array();            
+            $this->__insideConfigArr['avgserviceticket']['sql_get_highest_service'] = $this->DB_ReadOnly->query("SELECT count(DISTINCT retail.cinvoiceno) as invoice_count, sum(retail.nprice*retail.nquantity) as total_service,emp.cfirstname,emp.clastname,emp.iid FROM ".MILL_SERVICE_SALES." retail 
+                    join ".MILL_EMPLOYEE_LISTING." emp on emp.iid=retail.iempid 
+                    WHERE 
+                    retail.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    retail.tdatetime >= '".$temp["start_date"]."' and 
+                    retail.tdatetime <= '".$temp["end_date"]."' and 
+                    retail.lrefund = 'false' GROUP BY retail.iempid")->result_array();
+            
+                $highestRetailRow = array();
+                if(!empty($this->__insideConfigArr['avgserviceticket']['sql_get_highest_service'])){
+                    foreach($this->__insideConfigArr['avgserviceticket']['sql_get_highest_service'] as $result)
+                    {
+                        
+                        $this->__insideConfigArr['avgserviceticket']['avgServiceTicket'][] = number_format($result['total_service']/$result['invoice_count'], 2, '.', ' ');
+                        $this->__insideConfigArr['avgserviceticket']['iempname'][] = trim($result['cfirstname']);
+                        $this->__insideConfigArr['avgserviceticket']['iid'][] = $result['iid'];
+                    }
+                }   
+                    
+                if(isset($this->__insideConfigArr['avgserviceticket']['avgServiceTicket']) && !empty($this->__insideConfigArr['avgserviceticket']['avgServiceTicket']))
+                    {
+                        $high_key_value = array_search(max($this->__insideConfigArr['avgserviceticket']['avgServiceTicket']), $this->__insideConfigArr['avgserviceticket']['avgServiceTicket']);
+
+                        $this->staffCalcData["highest_avg_serviceTicket_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['avgserviceticket']['avgServiceTicket'][$high_key_value],2);
+                        $this->staffCalcData["highest_avg_serviceTicket_employee"] = $this->__insideConfigArr['avgserviceticket']['iempname'][$high_key_value];
+                        $this->staffCalcData["highest_avg_serviceTicket_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['avgserviceticket']['iid'][$high_key_value], $this->salonAccountId);
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_avg_serviceTicket_value"] = '0.00';
+                        $this->staffCalcData["highest_avg_serviceTicket_employee"] = "";
+                        $this->staffCalcData["highest_avg_serviceTicket_employee_image"] = "";
+                    }
+            
+        }
+    
+        private function __leaderBoardPrebookPercentage($temp)
+        {
+                
+            //LEADER BOARD DATA for %Prebooked
+                $this->__insideConfigArr['prebookpercentage'] = array();
+                $sql_get_highest_prebook_service_true = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as unique_client_count,emp.cfirstname,emp.clastname,emp.iid FROM ".MILL_SERVICE_SALES." service 
+                    join ".MILL_EMPLOYEE_LISTING." emp on emp.iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.lprebook = 'true' and
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' and 
+                    service.lrefund = 'false' GROUP BY service.iempid");
+                $this->__insideConfigArr['prebookpercentage']["prebook_true_count"] = $sql_get_highest_prebook_service_true->result_array();
+
+                $sql_get_highest_prebook_service_all = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as unique_client_count,emp.cfirstname,emp.clastname,emp.iid FROM ".MILL_SERVICE_SALES." service 
+                    join ".MILL_EMPLOYEE_LISTING." emp on emp.iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' and 
+                    service.lrefund = 'false' GROUP BY service.iempid");
+                $this->__insideConfigArr['prebookpercentage']["prebook_all_count"] = $sql_get_highest_prebook_service_all->result_array();
+
+                
+                if(!empty($this->__insideConfigArr['prebookpercentage']["prebook_all_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["prebook_true_count"]))
+                {
+                    if(COUNT($this->__insideConfigArr['prebookpercentage']["prebook_all_count"]) > COUNT($this->__insideConfigArr['prebookpercentage']["prebook_true_count"]))
+                    {
+                        foreach($this->__insideConfigArr['prebookpercentage']["prebook_all_count"] as $key => $prebook_value)
+                        {
+                            //echo $prebook_value["iid"];exit;
+                            $search_key = array_search($prebook_value["iid"], array_column($this->__insideConfigArr['prebookpercentage']["prebook_true_count"], 'iid'));
+                            //echo $search_key;exit;
+
+                            if($search_key !== false)
+                            {
+                                if(isset($prebook_value["unique_client_count"]) && isset($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$search_key]["unique_client_count"]) && !empty($prebook_value["unique_client_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$search_key]["unique_client_count"]))
+                                {
+                                    
+
+                                    $this->__insideConfigArr['prebookpercentage']['prebook_percent'][] = ($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$search_key]["unique_client_count"]/$prebook_value["unique_client_count"])*100;
+                                    $this->__insideConfigArr['prebookpercentage']['iempname'][] = trim($prebook_value["cfirstname"]);
+                                    $this->__insideConfigArr['prebookpercentage']['iid'][] = $prebook_value['iid'];
+                                }
+                            }
+                        }
+                    }
+                    elseif(COUNT($this->__insideConfigArr['prebookpercentage']["prebook_true_count"]) > COUNT($this->__insideConfigArr['prebookpercentage']["prebook_all_count"]))
+                    {
+                        foreach($this->__insideConfigArr['prebookpercentage']["prebook_true_count"] as $key => $prebookTrue_value)
+                        {
+                            $search_key = array_search($prebookTrue_value["iid"], array_column($this->__insideConfigArr['prebookpercentage']["prebook_all_count"], 'iid'));
+                            //echo $search_key;exit;
+
+                            if($search_key !== false)
+                            {
+                                if(isset($this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$search_key]["unique_client_count"]) && isset($prebookTrue_value["unique_client_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$search_key]["unique_client_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["unique_client_count"]))
+                                {
+                                    
+
+                                    $this->__insideConfigArr['prebookpercentage']['prebook_percent'][] = ($prebookTrue_value["unique_client_count"]/$this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$search_key]["unique_client_count"])*100;
+                                    $this->__insideConfigArr['prebookpercentage']['iempname'][] = trim($prebookTrue_value["cfirstname"]);
+                                    $this->__insideConfigArr['prebookpercentage']['iid'][] = $prebookTrue_value['iid'];
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for($i=0;$i<count($this->__insideConfigArr['prebookpercentage']["prebook_true_count"]);$i++)
+                        {
+                            //echo $i."<br>";
+                            //echo $this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$i]["unique_client_count"];exit;
+                            if(isset($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$i]["unique_client_count"]) && isset($this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$i]["unique_client_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$i]["unique_client_count"]) && !empty($this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$i]["unique_client_count"]))
+                            {
+                                $this->__insideConfigArr['prebookpercentage']['prebook_percent'][] = ($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$i]["unique_client_count"]/$this->__insideConfigArr['prebookpercentage']["prebook_all_count"][$i]["unique_client_count"])*100;
+                                $this->__insideConfigArr['prebookpercentage']['iempname'][] = trim($this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$i]["cfirstname"]);
+                                $this->__insideConfigArr['prebookpercentage']['iid'][] = $this->__insideConfigArr['prebookpercentage']["prebook_true_count"][$i]['iid'];
+                            }
+                        }
+                    }
+                    //for($i=0;$i<count($this->__insideConfigArr);$i++)
+                }   
+                    
+                if(isset($this->__insideConfigArr['prebookpercentage']['prebook_percent']) && !empty($this->__insideConfigArr['prebookpercentage']['prebook_percent']))
+                    {
+                        $high_key_value = array_search(max($this->__insideConfigArr['prebookpercentage']['prebook_percent']), $this->__insideConfigArr['prebookpercentage']['prebook_percent']);
+                        $this->staffCalcData["highest_prebook_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['prebookpercentage']['prebook_percent'][$high_key_value],2);
+                        $this->staffCalcData["highest_prebook_sold_employee"] = $this->__insideConfigArr['prebookpercentage']['iempname'][$high_key_value];
+                        $this->staffCalcData["highest_prebook_sold_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['prebookpercentage']['iid'][$high_key_value], $this->salonAccountId);
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_prebook_value"] = '0.00';
+                        $this->staffCalcData["highest_prebook_sold_employee"] = "";
+                        $this->staffCalcData["highest_prebook_sold_employee_image"] = "";
+                    }
+            
+        }
+        
+        private function __leaderBoardBookPercentage($temp)
+        {
+               
+            //Leader Board Data FOR %BOOKED
+                $this->__insideConfigArr['bookpercentage'] = array();
+                $sql_get_highest_appts_booked = $this->DB_ReadOnly->query("SELECT SUM(appts.Nstartlen) as nstartlen,SUM(appts.Ngaplen) as ngaplen,SUM(appts.Nfinishlen) as nfinishlen,emp.name,emp.emp_iid FROM ".MILL_PAST_APPTS_TABLE." appts 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid = appts.iempid  
+                    WHERE 
+                    appts.AccountNo = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    date(appts.AppointmentDate) >= '".$temp["start_date"]."' and 
+                    date(appts.AppointmentDate) <= '".$temp["end_date"]."' GROUP BY appts.EmployeeName ORDER BY emp.emp_iid ASC");
+                
+                $this->__insideConfigArr['bookpercentage']["booked_hours_count"] = $sql_get_highest_appts_booked->result_array();
+
+                $sql_get_highest_employee_schedule_hours = $this->DB_ReadOnly->query("SELECT SUM(empschedule.nhours) as nhours,emp.name,emp.emp_iid FROM ".MILL_EMPLOYEE_SCHEDULE_HOURS." empschedule 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid=empschedule.iempid 
+                    WHERE 
+                    empschedule.account_no = '".$this->salonAccountId."' and 
+                    empschedule.cworktype = 'Work Time' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    empschedule.dayRangeType = 'Monthly' and 
+                    empschedule.start_date >= '".$temp["start_date"]."' and 
+                    empschedule.end_date <= '".$temp["end_date"]."' GROUP BY empschedule.iempid ORDER BY emp.emp_iid ASC");
+                
+                $this->__insideConfigArr['bookpercentage']["scheduled_hours_count"] = $sql_get_highest_employee_schedule_hours->result_array();
+                
+                if(!empty($this->__insideConfigArr['bookpercentage']["booked_hours_count"]) && !empty($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"]))
+                {
+                    if(COUNT($this->__insideConfigArr['bookpercentage']["booked_hours_count"]) > COUNT($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"]))
+                    {
+                        foreach($this->__insideConfigArr['bookpercentage']["booked_hours_count"] as $key => $booked_hours_count_value)
+                        {
+                            
+                            $search_key = array_search($booked_hours_count_value["emp_iid"], array_column($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"], 'emp_iid'));
+                        
+                            if($search_key !== false)
+                            {
+                                if(isset($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$search_key]["nhours"]) && !empty($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$search_key]["nhours"]))
+                                {
+                                    
+                                    $totalHoursBookedForSalon = ($booked_hours_count_value['nstartlen'] + $booked_hours_count_value['ngaplen'] + $booked_hours_count_value['nfinishlen']);
+
+                                    $this->__insideConfigArr['bookpercentage']['percent_booked'][] = ($totalHoursBookedForSalon/$this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$search_key]["nhours"])*100;
+
+                                    $this->__insideConfigArr['bookpercentage']['iempname'][] = trim($booked_hours_count_value["name"]);
+                                    $this->__insideConfigArr['bookpercentage']['iid'][] = $booked_hours_count_value['emp_iid'];
+                                }
+                            }
+                        }
+                    }
+                    else if(COUNT($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"]) > COUNT($this->__insideConfigArr['bookpercentage']["booked_hours_count"]))
+                    {
+                        foreach($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"] as $key => $scheduled_hours_count_value)
+                        {
+                            
+                            $search_key = array_search($scheduled_hours_count_value["emp_iid"], array_column($this->__insideConfigArr['bookpercentage']["booked_hours_count"], 'emp_iid'));
+                            
+                            if($search_key !== false)
+                            {
+                                if(isset($scheduled_hours_count_value["nhours"]) && !empty($scheduled_hours_count_value["nhours"]))
+                                {
+                                    
+                                    $totalHoursBookedForSalon = ($this->__insideConfigArr['bookpercentage']["booked_hours_count"][$search_key]["nstartlen"] + $this->__insideConfigArr['bookpercentage']["booked_hours_count"][$search_key]["ngaplen"] + $this->__insideConfigArr['bookpercentage']["booked_hours_count"][$search_key]["nfinishlen"]);
+
+                                    $this->__insideConfigArr['bookpercentage']['percent_booked'][] = ($totalHoursBookedForSalon/$scheduled_hours_count_value["nhours"])*100;
+
+                                    $this->__insideConfigArr['bookpercentage']['iempname'][] = trim($scheduled_hours_count_value["name"]);
+                                    $this->__insideConfigArr['bookpercentage']['iid'][] = $scheduled_hours_count_value['emp_iid'];
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for($i=0;$i<count($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"]);$i++)
+                        {
+                            if(isset($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$i]["nhours"]) && !empty($this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$i]["nhours"]))
+                            {
+                                $totalHoursBookedForSalon = ($this->__insideConfigArr['bookpercentage']["booked_hours_count"][$i]['nstartlen'] + $this->__insideConfigArr['bookpercentage']["booked_hours_count"][$i]['ngaplen'] + $this->__insideConfigArr['bookpercentage']["booked_hours_count"][$i]['nfinishlen']);
+
+                                $this->__insideConfigArr['bookpercentage']['percent_booked'][] = ($totalHoursBookedForSalon/$this->__insideConfigArr['bookpercentage']["scheduled_hours_count"][$i]["nhours"])*100;
+
+                                $this->__insideConfigArr['bookpercentage']['iempname'][] = trim($this->__insideConfigArr['bookpercentage']["booked_hours_count"][$i]["name"]);
+                                $this->__insideConfigArr['bookpercentage']['iid'][] = $this->__insideConfigArr['bookpercentage']["booked_hours_count"][$i]['emp_iid'];
+                            }
+                        }
+                    }
+                }
+                
+                if(isset($this->__insideConfigArr['bookpercentage']['percent_booked']) && !empty($this->__insideConfigArr['bookpercentage']['percent_booked']))
+                {
+                    $high_key_value = array_search(max($this->__insideConfigArr['bookpercentage']['percent_booked']), $this->__insideConfigArr['bookpercentage']['percent_booked']);
+
+                    $this->staffCalcData["highest_percent_booked_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['bookpercentage']['percent_booked'][$high_key_value],2);
+                    $this->staffCalcData["highest_percent_booked_employee"] = $this->__insideConfigArr['bookpercentage']['iempname'][$high_key_value];
+                    $this->staffCalcData["highest_percent_booked_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['bookpercentage']['iid'][$high_key_value], $this->salonAccountId);
+                }
+                else
+                {
+                    $this->staffCalcData["highest_percent_booked_value"] = '0.00';
+                    $this->staffCalcData["highest_percent_booked_employee"] = "";
+                    $this->staffCalcData["highest_percent_booked_employee_image"] = "";
+                }
+        }
+        
+        private function __leaderBoardNewClient($temp)
+        {
+            //LEADER BOARD DATA FOR NEW CLIENTS
+                $this->__insideConfigArr['newclient'] = array();        
+                $this->__insideConfigArr['newclient']['get_highest_new_clients_from_appts'] = $this->db->query("SELECT count(DISTINCT client.ClientId) as new_client_count,EmployeeName,iempid FROM 
+                    ".MILL_CLIENTS_TABLE." client 
+                    join ".MILL_PAST_APPTS_TABLE." appts on appts.ClientId=client.ClientId 
+                    WHERE 
+                    appts.AccountNo = '".$this->salonAccountId."' and 
+                    appts.SlcStatus != 'Deleted' and 
+                    client.AccountNo = '".$this->salonAccountId."' and 
+                    date(appts.AppointmentDate) >= '".$temp["start_date"]."' and 
+                    date(appts.AppointmentDate) <= '".$temp["end_date"]."' and 
+                    client.clientFirstVistedDate =  client.clientLastVistedDate GROUP BY appts.iempid")->result_array();
+                
+                
+                if(!empty($this->__insideConfigArr['newclient']['get_highest_new_clients_from_appts'] )){
+
+                    foreach($this->__insideConfigArr['newclient']['get_highest_new_clients_from_appts']  as $result){
+                        $this->__insideConfigArr['newclient']['new_client_count'][] = $result['new_client_count'];
+                        $this->__insideConfigArr['newclient']['iempname'][] = trim($result['EmployeeName']);
+                        $this->__insideConfigArr['newclient']['iid'][] = $result['iempid'];
+                    
+                    }
+                }
+                
+                if(isset($this->__insideConfigArr['newclient']['new_client_count']) && !empty($this->__insideConfigArr['newclient']['new_client_count']))
+                {
+                    $high_key_value = array_search(max($this->__insideConfigArr['newclient']['new_client_count']), $this->__insideConfigArr['newclient']['new_client_count']);
+
+                    $this->staffCalcData["highest_new_guests_value"] = $this->__insideConfigArr['newclient']['new_client_count'][$high_key_value];
+                    $this->staffCalcData["highest_new_guests_employee"] = $this->__insideConfigArr['newclient']['iempname'][$high_key_value];
+                    $this->staffCalcData["highest_new_guests_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['newclient']['iid'][$high_key_value], $this->salonAccountId);
+                }
+                else
+                {
+                    $this->staffCalcData["highest_new_guests_value"] = '0.00';
+                    $this->staffCalcData["highest_new_guests_employee"] = "";
+                    $this->staffCalcData["highest_new_guests_employee_image"] = "";
+                }
+                
+                
+        }
+        
+        private function __leaderBoardTotalRetailSales($temp)
+        {
+            //LEADER BOARD DATA for RETAIL SALES OF STYLISTS
+                $this->__insideConfigArr['totalretailsales'] = array();        
+                $this->__insideConfigArr['totalretailsales']['get_highest_retail'] = $this->DB_ReadOnly->query("SELECT count(DISTINCT retail.cinvoiceno) as invoice_count, sum(retail.nprice*retail.nquantity) as total_retail,emp.name,emp.emp_iid FROM ".MILL_PRODUCT_SALES." retail 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid=retail.iempid 
+                    WHERE 
+                    retail.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    retail.tdatetime >= '".$temp["start_date"]."' and 
+                    retail.tdatetime <= '".$temp["end_date"]."' GROUP BY retail.iempid")->result_array();
+
+            
+                if(!empty($this->__insideConfigArr['totalretailsales']['get_highest_retail'])){
+                    foreach($this->__insideConfigArr['totalretailsales']['get_highest_retail'] as $result){
+
+                        $this->__insideConfigArr['totalretailsales']['retail_total'][] =  $this->Common_model->appCloudNumberFormat($result['total_retail'],2);
+                        $this->__insideConfigArr['totalretailsales']['iempname'][] = trim($result['name']);
+                        $this->__insideConfigArr['totalretailsales']['iid'][] = $result['emp_iid'];
+
+                    }
+                    //print_r($this->__insideConfigArr['totalretailsales']);exit;
+                }
+                
+                if(isset($this->__insideConfigArr['totalretailsales']['retail_total']) && !empty($this->__insideConfigArr['totalretailsales']['retail_total']))
+                {
+                    $high_key_value = array_search(max($this->__insideConfigArr['totalretailsales']['retail_total']), $this->__insideConfigArr['totalretailsales']['retail_total']);
+
+                    $this->staffCalcData["highest_product_revenue_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['totalretailsales']['retail_total'][$high_key_value],2);
+                    $this->staffCalcData["highest_product_revenue_employee"] = $this->__insideConfigArr['totalretailsales']['iempname'][$high_key_value];
+                    $this->staffCalcData["highest_product_revenue_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['totalretailsales']['iid'][$high_key_value], $this->salonAccountId);
+                }
+                else
+                {
+                    $this->staffCalcData["highest_product_revenue_value"] = '0.00';
+                    $this->staffCalcData["highest_product_revenue_employee"] = "";
+                    $this->staffCalcData["highest_product_revenue_employee_image"] = "";
+                }
+                
+        }
+        
+        private function __leaderBoardTotalServiceSales($temp)
+        {
+            $this->__insideConfigArr['totalservicesales'] = array(); 
+            $this->__insideConfigArr['totalservicesales']['get_highest_service'] = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as invoice_count, sum(service.nprice*service.nquantity) as total_service,emp.name,emp.emp_iid FROM ".MILL_SERVICE_SALES." service 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' GROUP BY service.iempid")->result_array();
+                
+                if(!empty($this->__insideConfigArr['totalservicesales']['get_highest_service'])){
+
+                    foreach($this->__insideConfigArr['totalservicesales']['get_highest_service'] as $result){
+                        $this->__insideConfigArr['totalservicesales']['service_total'][] = $this->Common_model->appCloudNumberFormat($result['total_service'],2);
+                        $this->__insideConfigArr['totalservicesales']['iempname'][] = trim($result['name']);
+                        $this->__insideConfigArr['totalservicesales']['iid'][] = $result['emp_iid'];
+
+                    }
+                }
+                
+                if(isset($this->__insideConfigArr['totalservicesales']['service_total']) && !empty($this->__insideConfigArr['totalservicesales']['service_total']))
+                {
+                    $high_key_value = array_search(max($this->__insideConfigArr['totalservicesales']['service_total']), $this->__insideConfigArr['totalservicesales']['service_total']);
+                    $this->staffCalcData["highest_service_revenue_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['totalservicesales']['service_total'][$high_key_value],2);
+                    $this->staffCalcData["highest_service_revenue_employee"] = $this->__insideConfigArr['totalservicesales']['iempname'][$high_key_value];
+                    $this->staffCalcData["highest_service_revenue_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['totalservicesales']['iid'][$high_key_value], $this->salonAccountId);
+                }
+                else
+                {
+                    $this->staffCalcData["highest_service_revenue_value"] = '0.00';
+                    $this->staffCalcData["highest_service_revenue_employee"] = "";
+                    $this->staffCalcData["highest_service_revenue_employee_image"] = "";
+                }
+                
+        }
+        
+        private function __leaderBoardColorPercentage($temp)
+        {
+            //Leader board Color percentage
+                $this->__insideConfigArr['colorservicesales'] = array(); 
+                $sql_get_color_service_total_sales = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as invoice_count, sum(service.nprice*service.nquantity) as total_service,emp.name,emp.emp_iid FROM ".MILL_SERVICE_SALES." service 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' and 
+                    (".$this->colorLikeStr.") GROUP BY service.iempid ORDER BY service.iempid ASC");
+                $this->__insideConfigArr['colorservicesales']["color_service_sales"] = $sql_get_color_service_total_sales->result_array();
+                                
+                $sql_get_all_service_total_sales = $this->DB_ReadOnly->query("SELECT count(DISTINCT service.cinvoiceno) as invoice_count, sum(service.nprice*service.nquantity) as total_service,emp.name,emp.emp_iid FROM ".MILL_SERVICE_SALES." service 
+                    join ".STAFF2_TABLE." emp on emp.emp_iid=service.iempid 
+                    WHERE 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    emp.account_no = '".$this->salonAccountId."' and 
+                    service.tdatetime >= '".$temp["start_date"]."' and 
+                    service.tdatetime <= '".$temp["end_date"]."' GROUP BY service.iempid ORDER BY service.iempid ASC");
+                $this->__insideConfigArr['colorservicesales']["all_service_sales"] = $sql_get_all_service_total_sales->result_array();
+                
+
+                if(!empty($this->__insideConfigArr['colorservicesales']["color_service_sales"]) && !empty($this->__insideConfigArr['colorservicesales']["all_service_sales"]))
+                {
+                    if(COUNT($this->__insideConfigArr['colorservicesales']["color_service_sales"]) > COUNT($this->__insideConfigArr['colorservicesales']["all_service_sales"]))
+                    {
+                        foreach($this->__insideConfigArr['colorservicesales']["color_service_sales"] as $key => $color_service_sales_value)
+                        {
+                            
+                            $search_key = array_search($color_service_sales_value["emp_iid"], array_column($this->__insideConfigArr['colorservicesales']["all_service_sales"], 'emp_iid'));
+                            
+                            if($search_key !== false)
+                            {
+                                if(isset($this->__insideConfigArr['colorservicesales']["all_service_sales"][$search_key]["total_service"]) && !empty($this->__insideConfigArr['colorservicesales']["all_service_sales"][$search_key]["total_service"]) && isset($color_service_sales_value["total_service"]) && !empty($color_service_sales_value["total_service"]))
+                                {
+                                    
+                                    $this->__insideConfigArr['colorservicesales']['prebook_percent'][] = ($color_service_sales_value["total_service"]/$this->__insideConfigArr['colorservicesales']["all_service_sales"][$search_key]["total_service"])*100;
+
+                                    $this->__insideConfigArr['colorservicesales']['iempname'][] = trim($color_service_sales_value["name"]);
+                                    $this->__insideConfigArr['colorservicesales']['iid'][] = $color_service_sales_value['emp_iid'];
+                                }
+                            }
+                        }
+                    }
+                    elseif(COUNT($this->__insideConfigArr['colorservicesales']["all_service_sales"]) > COUNT($this->__insideConfigArr['colorservicesales']["color_service_sales"]))
+                    {
+                        foreach($this->__insideConfigArr['colorservicesales']["all_service_sales"] as $key => $all_service_sales_value)
+                        {
+                            
+                            $search_key = array_search($all_service_sales_value["emp_iid"], array_column($this->__insideConfigArr['colorservicesales']["color_service_sales"], 'emp_iid'));
+                            
+                            if($search_key !== false)
+                            {
+                                if(isset($all_service_sales_value["total_service"]) && !empty($all_service_sales_value["total_service"]) && isset($this->__insideConfigArr['colorservicesales']["color_service_sales"][$search_key]["total_service"]) && !empty($this->__insideConfigArr['colorservicesales']["color_service_sales"][$search_key]["total_service"]))
+                                {
+                                    
+                                    $this->__insideConfigArr['colorservicesales']['color_percent'][] = ($this->__insideConfigArr['colorservicesales']["color_service_sales"][$search_key]["total_service"]/$all_service_sales_value["total_service"])*100;
+
+                                    $this->__insideConfigArr['colorservicesales']['iempname'][] = trim($all_service_sales_value["name"]);
+                                    $this->__insideConfigArr['colorservicesales']['iid'][] = $all_service_sales_value['emp_iid'];
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for($i=0;$i<count($this->__insideConfigArr['colorservicesales']["color_service_sales"]);$i++)
+                        {
+                            if(isset($this->__insideConfigArr['colorservicesales']["all_service_sales"][$i]) && $this->__insideConfigArr['colorservicesales']["color_service_sales"][$i] && !empty($this->__insideConfigArr['colorservicesales']["all_service_sales"][$i]["total_service"]) && !empty($this->__insideConfigArr['colorservicesales']["color_service_sales"][$i]["total_service"]))
+                            {
+
+                                $this->__insideConfigArr['colorservicesales']['color_percent'][] = ($this->__insideConfigArr['colorservicesales']["color_service_sales"][$i]["total_service"]/$this->__insideConfigArr['colorservicesales']["all_service_sales"][$i]["total_service"])*100;
+                                $this->__insideConfigArr['colorservicesales']['iempname'][] = trim($this->__insideConfigArr['colorservicesales']["color_service_sales"][$i]["name"]);
+                                $this->__insideConfigArr['colorservicesales']['iid'][] = $this->__insideConfigArr['colorservicesales']["color_service_sales"][$i]['emp_iid'];
+
+                            }
+                            
+                        }
+                    }
+                    
+                    if(!empty($this->__insideConfigArr['colorservicesales']['color_percent']))
+                    {
+                        $high_key_value = array_search(max($this->__insideConfigArr['colorservicesales']['color_percent']), $this->__insideConfigArr['colorservicesales']['color_percent']);
+                        
+                        $this->staffCalcData["highest_color_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['colorservicesales']['color_percent'][$high_key_value],2);
+                        $this->staffCalcData["highest_color_employee"] = $this->__insideConfigArr['colorservicesales']['iempname'][$high_key_value];
+                        $this->staffCalcData["highest_color_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['colorservicesales']['iid'][$high_key_value], $this->salonAccountId);
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_color_value"] = '0.00';
+                        $this->staffCalcData["highest_color_employee"] = "";
+                        $this->staffCalcData["highest_color_employee_image"] = "";
+                    }
+                }
+                else
+                {
+                    $this->staffCalcData["highest_color_value"] = '0.00';
+                    $this->staffCalcData["highest_color_employee"] = "";
+                    $this->staffCalcData["highest_color_employee_image"] = "";
+                }
+            
+        }
+        
+        private function __leaderBoardRebookPercentage($temp)
+        {
+            /**
+            * BOC: REBOOK LEADER BOARD CALCULATION
+            */
+            $this->__insideConfigArr['rebookpercentage'] = array(); 
+            $tempArrRebookCount = array();
+                $sql_get_unique_clients_count_obj = $this->DB_ReadOnly->query("
+                                            SELECT rebook.iempid,emp.name ,SUM(rebook.unique_client_count) as all_stafs_unique_client_count FROM
+                                                (
+                                                    SELECT tdatetime, iempid, count( DISTINCT iclientid ) AS unique_client_count 
+                                                    FROM ".MILL_SERVICE_SALES." 
+                                                    WHERE account_no = '".$this->salonAccountId."' 
+                                                    AND   tdatetime >= '".$temp["start_date"]."'
+                                                    AND tdatetime <= '".$temp["end_date"]."' 
+                                                    AND lrefund = 'false' 
+                                                    GROUP BY tdatetime,iempid 
+                                                ) AS rebook 
+                                            join ".STAFF2_TABLE." emp 
+                                            on emp.emp_iid = rebook.iempid 
+                                            where emp.account_no = '".$this->salonAccountId."' 
+                                            GROUP BY rebook.iempid     
+                                            order by rebook.iempid");
+                
+                //echo $this->db->last_query();exit;
+                $this->__insideConfigArr['rebookpercentage']['total_unique_client_Arr'] = $sql_get_unique_clients_count_obj->result_array();
+               
+                
+            if($this->__insideConfigArr['rebookpercentage']['total_unique_client_Arr']){
+                    
+                $total_unique_clients_count = 0;
+                foreach ( $this->__insideConfigArr['rebookpercentage']['total_unique_client_Arr'] as  $totalClientCountperStaff){
+                    $total_unique_clients_count += $totalClientCountperStaff['all_stafs_unique_client_count'];
+                    $this->__insideConfigArr['rebookpercentage']["staff"][$totalClientCountperStaff['iempid']] = $totalClientCountperStaff['name'];
+                    $this->__insideConfigArr['rebookpercentage']["total_unique_clients_count"][$totalClientCountperStaff['iempid']] = $totalClientCountperStaff['all_stafs_unique_client_count'];
+                }
+                
+
+                $begin = new DateTime($temp["start_date"]);
+                $end = new DateTime($temp["end_date"]);
+                $end = $end->modify( '+1 day' );
+                $interval = new DateInterval('P1D');
+                $daterange = new DatePeriod($begin, $interval ,$end);
+                
+                foreach($daterange as $datess){
+                    //echo $datess->format("Y-m-d") . "<br>";
+                    
+                    $this->DB_ReadOnly->select('iempid,GROUP_CONCAT( DISTINCT iclientid ) as DayWiseUniqueClient');
+                    $this->DB_ReadOnly->group_by('iempid');
+                    $this->__insideConfigArr['rebookpercentage']['getServiceSalesUniqueClientIds'] = $this->DB_ReadOnly->get_where(MILL_SERVICE_SALES, array('account_no' =>$this->salonAccountId ,'tdatetime' => $datess->format("Y-m-d"),'lrefund' => 'false'))->result_array();
+                     
+                    $plusFourMonthsDate = date('Y-m-d',strtotime($datess->format("Y-m-d") . "+120 days"));
+                    
+         
+                    if(!empty($this->__insideConfigArr['rebookpercentage']['getServiceSalesUniqueClientIds'])){
+                        foreach($this->__insideConfigArr['rebookpercentage']['getServiceSalesUniqueClientIds'] as $concatClientIds){
+                            $this->__insideConfigArr['rebookpercentage']['sql_get_clients_serviced_count'] = $this->DB_ReadOnly->query("SELECT future_clients . * ,emp.name,emp.emp_iid
+                            FROM (
+                                SELECT iempid,count(DISTINCT ClientId) as client_count FROM 
+                                ".MILL_APPTS_TABLE."  
+                                WHERE 
+                                AccountNo = '".$this->salonAccountId."' and 
+                                SlcStatus != 'Deleted' and 
+                                str_to_date(AppointmentDate, '%m/%d/%Y') >= '".$datess->format("Y-m-d")."' and 
+                                str_to_date(AppointmentDate, '%m/%d/%Y') <= '".$plusFourMonthsDate."' and 
+                                DATE(  MillCreatedDate ) <=  '".$datess->format("Y-m-d")."' and 
+                                LPrebook =  'true' and 
+                                iempid = ".$concatClientIds['iempid']." and     
+                                ClientId IN (".$concatClientIds['DayWiseUniqueClient'].")
+                            )
+                            AS future_clients join ".STAFF2_TABLE." emp on emp.emp_iid = future_clients.iempid where emp.account_no = '".$this->salonAccountId."' ")->row_array();
+                            
+                            
+                            $this->__insideConfigArr['rebookpercentage']['rebookClientArr'][$concatClientIds['iempid']][$datess->format("Y-m-d")] = isset($this->__insideConfigArr['rebookpercentage']['sql_get_clients_serviced_count']['client_count'])? $this->__insideConfigArr['rebookpercentage']['sql_get_clients_serviced_count']['client_count'] : 0;
+                          
+                           if(!isset($this->__insideConfigArr['rebookpercentage']['total_unique_clients_count'][$concatClientIds['iempid']]))
+                                  $tempArrRebookCount[$concatClientIds['iempid']] = 0;
+                        }
+                        
+                    }
+                }
+
+             
+                // merge those employee iid has no unique clients counts
+                $this->__insideConfigArr['rebookpercentage']['total_unique_clients_count'] = isset($this->__insideConfigArr['rebookpercentage']['total_unique_clients_count']) && !empty($this->__insideConfigArr['rebookpercentage']['total_unique_clients_count']) ? ($this->__insideConfigArr['rebookpercentage']['total_unique_clients_count'] + $tempArrRebookCount) : 0 ;
+                
+
+                if(!empty($this->__insideConfigArr['rebookpercentage']['rebookClientArr'])) {
+                    foreach ($this->__insideConfigArr['rebookpercentage']['rebookClientArr'] as $iempid => $rebookClient){
+                                $rebookClientCountArr[$iempid] = array_sum($rebookClient);
+                                $this->__insideConfigArr['rebookpercentage']["staff_rebook_percentage_daywise"][$iempid] = $rebookClientCountArr[$iempid];
+                                if($rebookClientCountArr[$iempid] > 0 && $this->__insideConfigArr['rebookpercentage']["total_unique_clients_count"][$iempid] > 0)
+                                    {
+                                        $this->__insideConfigArr['rebookpercentage']["rebook_percentage_order"][$iempid] = number_format(($rebookClientCountArr[$iempid]/$this->__insideConfigArr['rebookpercentage']["total_unique_clients_count"][$iempid])*100, 2, '.', '');
+                                    }
+                    }
+                }
+                else
+                {
+                    $this->__insideConfigArr['rebookpercentage']["rebook_percentage_order"] = array();
+                }
+                
+                
+                
+                if(isset($this->__insideConfigArr['rebookpercentage']['rebook_percentage_order']) && !empty($this->__insideConfigArr['rebookpercentage']['rebook_percentage_order']))  { 
+                    $staff_max_rebook_value = max($this->__insideConfigArr['rebookpercentage']['rebook_percentage_order']);
+
+                    $staff_maxs_rebook_ID = array_keys($this->__insideConfigArr['rebookpercentage']['rebook_percentage_order'], $staff_max_rebook_value);
+
+                  if(isset($staff_maxs_rebook_ID[0]))
+                      $staff_max_rebook_name = $this->__insideConfigArr['rebookpercentage']['staff'][$staff_maxs_rebook_ID[0]];
+                }
+            }
+                if(!empty($staff_max_rebook_value) && !empty($staff_maxs_rebook_ID) && !empty($staff_max_rebook_name))
+                {
+                    $this->staffCalcData["highest_rebook_value"] = $staff_max_rebook_value;
+                    $this->staffCalcData["highest_rebook_sold_employee"] = $staff_max_rebook_name;
+                    if(isset($staff_maxs_rebook_ID[0]))
+                        $this->staffCalcData["highest_rebook_sold_employee_image"] = $this->__getStaffImage($staff_maxs_rebook_ID[0], $this->salonAccountId);
+                      
+                }
+                else
+                {
+                    $this->staffCalcData["highest_rebook_value"] = '0.00';
+                    $this->staffCalcData["highest_rebook_sold_employee"] = "";
+                    $this->staffCalcData["highest_rebook_sold_employee_image"] = "";
+                }
+                //REBOOK LEADER BOARD ENDS
+        }
+        
+        private function __leaderBoardRetailPerService($temp)
+        {
+            //RETAIL PER SERVICE PER CURRENT DAY OF NEWLY ADDED SERVICE AND RETAIL
+                $this->__insideConfigArr['retailperservice'] = array();
+                $checkedOutClientId = !empty($temp['checked_out_client_id']) ? $temp['checked_out_client_id'] : '';
+                
+                // sql need to update not correct
+                $sql_get_retail_Of_Client = "SELECT count(DISTINCT retail.cinvoiceno) as invoice_count, sum(retail.nprice*retail.nquantity) as total_retail,client.Name FROM ".MILL_PRODUCT_SALES." retail 
+                    join ".MILL_CLIENTS_TABLE." client on client.ClientId=retail.iclientid 
+                    WHERE 
+                    retail.iempid = '".$temp['staff_iid']."' and 
+                    retail.account_no = '".$this->salonAccountId."' and 
+                    client.AccountNo = '".$this->salonAccountId."' and 
+                    retail.iclientid = '".$checkedOutClientId."' and 
+                    client.ClientId = '".$checkedOutClientId."' and 
+                    retail.tdatetime >= '".$this->currentDate."' and 
+                    retail.tdatetime <= '".$this->currentDate."' and 
+                    retail.lrefund = 'false'
+                    ";
+            
+                $this->__insideConfigArr['retailperservice']['stylistRetail_result'] = $this->DB_ReadOnly->query($sql_get_retail_Of_Client)->row_array();
+
+                $sql_get_service_Of_Client = "SELECT count(DISTINCT service.cinvoiceno) as invoice_count, sum(service.nprice*service.nquantity) as total_service,client.Name FROM ".MILL_SERVICE_SALES." service 
+                    join ".MILL_CLIENTS_TABLE." client on client.ClientId=service.iclientid 
+                    WHERE 
+                    service.iempid = '".$temp['staff_iid']."' and 
+                    service.account_no = '".$this->salonAccountId."' and 
+                    client.AccountNo = '".$this->salonAccountId."' and 
+                    service.iclientid = '".$checkedOutClientId."' and 
+                    client.ClientId = '".$checkedOutClientId."' and 
+                    service.tdatetime >= '".$this->currentDate."' and 
+                    service.tdatetime <= '".$this->currentDate."' and 
+                    service.lrefund = 'false'
+                    ";
+            
+                $this->__insideConfigArr['retailperservice']['stylistService_result'] = $this->DB_ReadOnly->query($sql_get_service_Of_Client)->row_array();
+
+                
+                if(!empty($this->__insideConfigArr['retailperservice']['stylistRetail_result']["total_retail"]) && $this->__insideConfigArr['retailperservice']['stylistRetail_result']["total_retail"]!=NULL  && !empty($this->__insideConfigArr['retailperservice']['stylistService_result']["total_service"]) && $this->__insideConfigArr['retailperservice']['stylistService_result']["total_service"]!=NULL)
+                {
+                    $this->staffCalcData["retailPerServiceValue"] = number_format(($this->__insideConfigArr['retailperservice']['stylistRetail_result']['total_retail']/$this->__insideConfigArr['retailperservice']['stylistService_result']["total_service"])*100, 2, '.', '');
+                }
+                else
+                {
+                    $this->staffCalcData["retailPerServiceValue"] = '0.00';
+                }
+
+                if(!empty($this->__insideConfigArr['retailperservice']['stylistRetail_result']['Name']))
+                {
+                    $this->staffCalcData["client_name"] = $this->__insideConfigArr['retailperservice']['stylistRetail_result']['Name'];
+                }
+                else if(!empty($this->__insideConfigArr['retailperservice']['stylistService_result']['Name']))
+                {
+                    $this->staffCalcData["client_name"] = $this->__insideConfigArr['retailperservice']['stylistService_result']['Name'];
+                }
+                else
+                {
+                    $this->staffCalcData["client_name"] = "";
+                }
+        }
+        
+        private function __leaderBoardRUCT($temp)
+        {
+            //RUCT LEADER BOARD STARTS
+                        $this->__insideConfigArr['ructleaderboard'] = array();
+                        $sql_get_all_product_total_units_obj = $this->DB_ReadOnly->query("SELECT sum(retail.nquantity) as total_retail_units,emp.name,emp.emp_iid FROM ".MILL_PRODUCT_SALES." retail 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=retail.iempid 
+                        WHERE 
+                        retail.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        retail.lrefund = 'false' and
+                        retail.tdatetime >= '".$temp["start_date"]."' and 
+                        retail.tdatetime <= '".$temp["end_date"]."' GROUP BY retail.iempid ORDER BY retail.iempid ASC");
+                    
+                    $this->__insideConfigArr['ructleaderboard']['all_retail_units'] = $sql_get_all_product_total_units_obj->result_array();
+                    //GET TOTAL CLIENTS TICKET BY THE STYLIST
+                    //Get CLient TICKETS
+                    $sql_get_all_service_unique_invoices_obj = $this->DB_ReadOnly->query("select distinct t.name,t.emp_iid,COUNT(t.service_tickets) AS unique_tkts_count FROM (SELECT DISTINCT(service.cinvoiceno) as service_tickets,emp.name,emp.emp_iid FROM ".MILL_SERVICE_SALES." service 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=service.iempid 
+                        WHERE 
+                        service.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        service.lrefund = 'false' and
+                        service.tdatetime >= '".$temp["start_date"]."' and 
+                        service.tdatetime <= '".$temp["end_date"]."'
+                        UNION 
+                        SELECT DISTINCT(retail.cinvoiceno) as retail_tickets,emp.name,emp.emp_iid FROM ".MILL_PRODUCT_SALES." retail 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=retail.iempid 
+                        WHERE 
+                        retail.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        retail.lrefund = 'false' and
+                        retail.tdatetime >= '".$temp["start_date"]."' and 
+                        retail.tdatetime <= '".$temp["end_date"]."') as t GROUP BY t.emp_iid
+                        ");
+                    $this->__insideConfigArr['ructleaderboard']["all_unique_tickets"] = $sql_get_all_service_unique_invoices_obj->result_array();
+                    
+                    
+                    
+                    if(!empty($this->__insideConfigArr['ructleaderboard']["all_retail_units"]) && !empty($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"]))
+                    {
+                        if(COUNT($this->__insideConfigArr['ructleaderboard']["all_retail_units"]) > COUNT($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"]))
+                        {
+                            foreach($this->__insideConfigArr['ructleaderboard']["all_retail_units"] as $key => $all_retail_units_values)
+                            {
+                                
+                                $search_key = array_search($all_retail_units_values["emp_iid"], array_column($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"], 'emp_iid'));
+                                //echo $search_key;exit;
+
+                                if($search_key !== false)
+                                {
+                                    if(isset($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$search_key]["unique_tkts_count"]) && !empty($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$search_key]["unique_tkts_count"]) && isset($all_retail_units_values["total_retail_units"]) && !empty($all_retail_units_values["total_retail_units"]))
+                                    {
+                                        
+                                        $this->__insideConfigArr['ructleaderboard']['ruct_value'][] = $all_retail_units_values["total_retail_units"]/$this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$search_key]["unique_tkts_count"];
+
+                                        $this->__insideConfigArr['ructleaderboard']['iempname'][] = trim($all_retail_units_values["name"]);
+                                        $this->__insideConfigArr['ructleaderboard']['iid'][] = $all_retail_units_values['emp_iid'];
+                                    }
+                                }
+                            }
+                        }
+                        elseif(COUNT($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"]) > COUNT($this->__insideConfigArr['ructleaderboard']["all_retail_units"]))
+                        {
+                            foreach($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"] as $key => $all_unique_tickets_values)
+                            {
+                                
+                                $search_key = array_search($all_unique_tickets_values["emp_iid"], array_column($this->__insideConfigArr['ructleaderboard']["all_retail_units"], 'emp_iid'));
+                                //echo $search_key;exit;
+                                
+                                if($search_key !== false)
+                                {
+                                    if(isset($all_unique_tickets_values["unique_tkts_count"]) && !empty($all_unique_tickets_values["unique_tkts_count"]) && isset($this->__insideConfigArr['ructleaderboard']["all_retail_units"][$search_key]["total_retail_units"]) && !empty($this->__insideConfigArr['ructleaderboard']["all_retail_units"][$search_key]["total_retail_units"]))
+                                    {
+                                        
+                                        $this->__insideConfigArr['ructleaderboard']['ruct_value'][] = $this->__insideConfigArr['ructleaderboard']["all_retail_units"][$search_key]["total_retail_units"]/$all_unique_tickets_values["unique_tkts_count"];
+
+                                        $this->__insideConfigArr['ructleaderboard']['iempname'][] = trim($all_unique_tickets_values["name"]);
+                                        $this->__insideConfigArr['ructleaderboard']['iid'][] = $all_unique_tickets_values['emp_iid'];
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            for($i=0;$i<count($this->__insideConfigArr['ructleaderboard']["all_retail_units"]);$i++)
+                            {
+                                //echo $i."<br>";
+                                //echo $colorPercentage["prebook_all_count"][$i]["unique_client_count"];exit;
+                                if(isset($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$i]) && $this->__insideConfigArr['ructleaderboard']["all_retail_units"][$i] && !empty($this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$i]["unique_tkts_count"]) && !empty($this->__insideConfigArr['ructleaderboard']["all_retail_units"][$i]["total_retail_units"]))
+                                {
+
+                                    $this->__insideConfigArr['ructleaderboard']['ruct_value'][] = $this->__insideConfigArr['ructleaderboard']["all_retail_units"][$i]["total_retail_units"]/$this->__insideConfigArr['ructleaderboard']["all_unique_tickets"][$i]["unique_tkts_count"];
+                                    $this->__insideConfigArr['ructleaderboard']['iempname'][] = trim($this->__insideConfigArr['ructleaderboard']["all_retail_units"][$i]["name"]);
+                                    $this->__insideConfigArr['ructleaderboard']['iid'][] = $this->__insideConfigArr['ructleaderboard']["all_retail_units"][$i]['emp_iid'];
+
+                                }
+                                
+                                //++$i; 
+                            }
+                        }
+                        //print_r($highestRUCT);exit;
+                        if(!empty($this->__insideConfigArr['ructleaderboard']['ruct_value']))
+                        {
+                            $high_key_value = array_search(max($this->__insideConfigArr['ructleaderboard']['ruct_value']), $this->__insideConfigArr['ructleaderboard']['ruct_value']);
+                            
+                            $this->staffCalcData["highest_ruct_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['ructleaderboard']['ruct_value'][$high_key_value], 2);
+                            $this->staffCalcData["highest_ruct_employee"] = $this->__insideConfigArr['ructleaderboard']['iempname'][$high_key_value];
+                            $this->staffCalcData["highest_ruct_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['ructleaderboard']['iid'][$high_key_value], $this->salonAccountId);
+                        }
+                        else
+                        {
+                            $this->staffCalcData["highest_ruct_value"] = "0.00";
+                            $this->staffCalcData["highest_ruct_employee"] = "";
+                            $this->staffCalcData["highest_ruct_employee_image"] = "";
+                        }
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_ruct_value"] = "0.00";
+                        $this->staffCalcData["highest_ruct_employee"] = "";
+                        $this->staffCalcData["highest_ruct_employee_image"] = "";
+                    }
+                    //RUCT LEADER BOARD ENDS
+        }
+        
+     private function __leaderBoardClientRetailPercentage($temp)
+        {
+            //PERCENTAGE OF CLIENTS BUYING RETAIL LEADER BOARD STARTS
+                    $this->__insideConfigArr['clientretailpercentage'] = array();
+                                            
+                    $sql_get_all_product_total_clients_obj = $this->DB_ReadOnly->query("SELECT COUNT(DISTINCT retail.iclientid) as retail_clients,emp.name,emp.emp_iid FROM ".MILL_PRODUCT_SALES." retail 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=retail.iempid 
+                        WHERE 
+                        retail.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        retail.lrefund = 'false' and
+                        retail.tdatetime >= '".$temp["start_date"]."' and 
+                        retail.tdatetime <= '".$temp["end_date"]."' GROUP BY retail.iempid ORDER BY retail.iempid ASC");
+                    $this->__insideConfigArr['clientretailpercentage']["all_retail_clients"] = $sql_get_all_product_total_clients_obj->result_array();
+
+                    //GET TOTAL CLIENTS THE STYLIST
+                    //Get CLients
+                    $sql_get_both_retail_service_unique_clients_obj = $this->DB_ReadOnly->query("select distinct t.name,t.emp_iid,COUNT(t.service_clients) AS unique_clients_count FROM (SELECT DISTINCT(service.iclientid) as service_clients,emp.name,emp.emp_iid FROM ".MILL_SERVICE_SALES." service 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=service.iempid 
+                        WHERE 
+                        service.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        service.lrefund = 'false' and
+                        service.tdatetime >= '".$temp["start_date"]."' and 
+                        service.tdatetime <= '".$temp["end_date"]."'
+                        UNION 
+                        SELECT DISTINCT(retail.iclientid) as retail_clients,emp.name,emp.emp_iid FROM ".MILL_PRODUCT_SALES." retail 
+                        join ".STAFF2_TABLE." emp on emp.emp_iid=retail.iempid 
+                        WHERE 
+                        retail.account_no = '".$this->salonAccountId."' and 
+                        emp.account_no = '".$this->salonAccountId."' and 
+                        retail.lrefund = 'false' and
+                        retail.tdatetime >= '".$temp["start_date"]."' and 
+                        retail.tdatetime <= '".$temp["end_date"]."') as t GROUP BY t.emp_iid
+                        ");
+                    $this->__insideConfigArr['clientretailpercentage']["all_unique_clients"] = $sql_get_both_retail_service_unique_clients_obj->result_array();
+                    //echo $this->db->last_query();exit;
+                    //print_r($this->__insideConfigArr['clientretailpercentage']);exit;
+                    if(!empty($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"]) && !empty($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"]))
+                    {
+                        if(COUNT($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"]) > COUNT($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"]))
+                        {
+                            foreach($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"] as $key => $all_retail_client_values)
+                            {
+                                
+                                $search_key = array_search($all_retail_client_values["emp_iid"], array_column($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"], 'emp_iid'));
+                                //echo $search_key;exit;
+
+                                if($search_key !== false)
+                                {
+                                    if(isset($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$search_key]["unique_clients_count"]) && !empty($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$search_key]["unique_clients_count"]) && isset($all_retail_client_values["retail_clients"]) && !empty($all_retail_client_values["retail_clients"]))
+                                    {
+                                        
+                                        $this->__insideConfigArr['clientretailpercentage']['retail_percentage_value'][] = ($all_retail_client_values["retail_clients"]/$this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$search_key]["unique_clients_count"])*100;
+
+                                        $this->__insideConfigArr['clientretailpercentage']['iempname'][] = trim($all_retail_client_values["name"]);
+                                        $this->__insideConfigArr['clientretailpercentage']['iid'][] = $all_retail_client_values['emp_iid'];
+                                    }
+                                }
+                            }
+                        }
+                        elseif(COUNT($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"]) > COUNT($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"]))
+                        {
+                            foreach($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"] as $key => $all_unique_clients_values)
+                            {
+                                
+                                $search_key = array_search($all_unique_clients_values["emp_iid"], array_column($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"], 'emp_iid'));
+                                //echo $search_key;exit;
+                                
+                                if($search_key !== false)
+                                {
+                                    if(isset($all_unique_clients_values["unique_clients_count"]) && !empty($all_unique_clients_values["unique_clients_count"]) && isset($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$search_key]["retail_clients"]) && !empty($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$search_key]["retail_clients"]))
+                                    {
+                                        
+                                        $this->__insideConfigArr['clientretailpercentage']['retail_percentage_value'][] = ($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$search_key]["retail_clients"]/$all_unique_clients_values["unique_clients_count"])*100;
+
+                                        $this->__insideConfigArr['clientretailpercentage']['iempname'][] = trim($all_unique_clients_values["name"]);
+                                        $this->__insideConfigArr['clientretailpercentage']['iid'][] = $all_unique_clients_values['emp_iid'];
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            for($i=0;$i<count($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"]);$i++)
+                            {
+                                //echo $i."<br>";
+                                //echo $colorPercentage["prebook_all_count"][$i]["unique_client_count"];exit;
+                                if(isset($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$i]) && $this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$i] && !empty($this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$i]["unique_clients_count"]) && !empty($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$i]["retail_clients"]))
+                                {
+
+                                    $this->__insideConfigArr['clientretailpercentage']['retail_percentage_value'][] = ($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$i]["retail_clients"]/$this->__insideConfigArr['clientretailpercentage']["all_unique_clients"][$i]["unique_clients_count"])*100;
+                                    $this->__insideConfigArr['clientretailpercentage']['iempname'][] = trim($this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$i]["name"]);
+                                    $this->__insideConfigArr['clientretailpercentage']['iid'][] = $this->__insideConfigArr['clientretailpercentage']["all_retail_clients"][$i]['emp_iid'];
+
+                                }
+                                
+                                //++$i; 
+                            }
+                        }
+                        
+                        if(!empty($this->__insideConfigArr['clientretailpercentage']['retail_percentage_value']))
+                        {
+                            $high_key_value = array_search(max($this->__insideConfigArr['clientretailpercentage']['retail_percentage_value']), $this->__insideConfigArr['clientretailpercentage']['retail_percentage_value']);
+                        
+                            $this->staffCalcData["highest_percentage_retail_value"] = $this->Common_model->appCloudNumberFormat($this->__insideConfigArr['clientretailpercentage']['retail_percentage_value'][$high_key_value], 2);
+                           
+                            $this->staffCalcData["highest_percentage_retail_employee"] = $this->__insideConfigArr['clientretailpercentage']['iempname'][$high_key_value];
+                            
+                            $this->staffCalcData["highest_percentage_retail_employee_image"] = $this->__getStaffImage($this->__insideConfigArr['clientretailpercentage']['iid'][$high_key_value], $this->salonAccountId);
+                        }
+                        else
+                        {
+                            $this->staffCalcData["highest_percentage_retail_value"] = "0.00";
+                            $this->staffCalcData["highest_percentage_retail_employee"] = "";
+                            $this->staffCalcData["highest_percentage_retail_employee_image"] = "";
+                        }
+                    }
+                    else
+                    {
+                        $this->staffCalcData["highest_percentage_retail_value"] = "0.00";
+                        $this->staffCalcData["highest_percentage_retail_employee"] = "";
+                        $this->staffCalcData["highest_percentage_retail_employee_image"] = "";
+                    }
+                    //Highest percentage retail Leader board ends
+            }    
+        
+}
+

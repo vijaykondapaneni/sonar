@@ -1,0 +1,85 @@
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+if(file_exists(APPPATH.'Nusoap_library.php')){
+        require_once(APPPATH.'Nusoap_library.php');
+}
+class DeleteData extends CI_Controller
+{
+    
+    // Define constant as per value;
+    CONST INSERTED = 0;
+    /**
+    AUTHOR: Subbu
+    DESCRIPTION: THIS CLASS IS FOR Creating New Salon
+    **/
+    function __construct()
+    {
+        parent::__construct();
+        $this->load->model('Common_model');
+        $this->load->model('Newsalon_model');
+        $this->DB_ReadOnly = $this->load->database('read_only', TRUE);
+       // $this->load->library("security");
+    }   
+    
+    /**
+     * Default index Fn
+     */
+    public function index(){print phpinfo();}
+    
+    /**
+     * 
+     * @param type $dayRangeType
+     * @param type $s
+     * @param type $e
+     */
+
+    public function deletefrom_salonid() 
+    {  
+   
+       $salonids=array('519','566','520','470','562');
+       $salon_ids=implode(",",$salonids);
+       
+       $tables=array('mill_clients_served_owner_reports','mill_client_buying_retail_staff_reports','mill_new_guest_owner_reports','mill_percentage_retail_to_service_sales_owner_reports','mill_percent_booked_owner_reports','mill_rebook_percentage_owner_reports','mill_repeat_guest_owner_reports','mill_report_based_on_skillset_calculations_cron','mill_retail_owner_reports','mill_rpct_calculations_cron','mill_rpct_owner_reports','mill_ruct_calculation_cron','mill_ruct_owner_reports','mill_service_owner_reports','mill_topfive_services_owner_report','mill_total_revenue_reports');
+       
+       foreach ($tables as $tab){       
+        $qry = $this->db->query("DELETE FROM $tab WHERE salon_id  in ($salon_ids)");
+        echo  $this->db->last_query();echo "<br>";echo "<br>";
+       }
+       exit;
+      
+    }
+  
+  public function deletefrom_accountnumber() 
+   {
+    $salonactnumbers=array('1654116471','272961249','73815755','1810567567','1270224774');
+    $salon_accountnumbers=implode(",",$salonactnumbers);
+       
+    $tables=array('mill_service_sales','mill_employee_listing','mill_employee_schedule_hours','mill_gift_card_sales_with_balance','mill_product_sales');
+       
+     foreach ($tables as $tab){ 
+        $qry = $this->db->query("DELETE FROM $tab WHERE account_no  in ($salon_accountnumbers)");
+        echo  $this->db->last_query();echo "<br>";echo "<br>";
+       }
+       exit;
+      
+  }
+
+
+  public function deletefrom_accountnumber_capital() 
+   {
+    $salonactnumbers=array('1654116471','272961249','73815755','1810567567','1270224774');
+    $salon_accountnumbers=implode(",",$salonactnumbers);
+       
+    $tables=array('mill_appointments','mill_clients','mill_cron_running_logs','mill_past_appointments');
+       
+     foreach ($tables as $tab){ 
+        $qry = $this->db->query("DELETE FROM $tab WHERE AccountNo  in ($salon_accountnumbers)");
+        echo  $this->db->last_query();echo "<br>";echo "<br>";
+       }
+       exit;
+      
+  }
+
+           
+ 
+ }       

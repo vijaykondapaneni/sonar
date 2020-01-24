@@ -1,0 +1,790 @@
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+if(file_exists(APPPATH.'Nusoap_library.php')){
+        require_once(APPPATH.'Nusoap_library.php');
+}
+
+class Wsimport_millsdk_appts extends CI_Controller {
+	/**
+       AUTHOR: Subbu
+       DESCRIPTION: THIS CLASS IS FOR IMPORT PAST APPOINTMENTS
+	**/
+    CONST INSERTED = 'Inserted';
+    CONST UPDATED = 'Updated';   
+    public $salonAccountId;
+    public $pemFilePath;
+    public $salonMillIp;
+    public $salonMillGuid;
+    public $salonMillUsername;
+    public $salonMillPassword;
+    public $salonMillSdkUrl;
+    public $startDate;
+    public $endDate;
+    public $millResponseXml;
+    public $millResponseSessionId;    
+
+   function __construct() {
+			parent::__construct();
+			$this->load->model('Common_model');
+			$this->load->model('Appointmentsimport_model');
+			$this->load->model('Twoyearclientsimport_model');
+			$this->DB_ReadOnly = $this->load->database('read_only', TRUE);
+
+		}
+   // Get Date Range Types
+    function __getStartEndDate($dayRangeType,$startDate,$endDate)
+    {
+        print $this->dayRangeType =  $dayRangeType;
+        
+         switch ($this->dayRangeType) {
+            case "Oneday":
+                $this->startDate = (!empty($startDate)) ? $startDate : date("Y-m-d");
+                $this->endDate   = (!empty($endDate)) ? $endDate : date("Y-m-d");
+            break;                          
+            case "Oneweek":
+                 $addStartDate =  date("Y-m-d", strtotime(" +1 days"));
+                 $addEndDate =  date("Y-m-d", strtotime(" +6 days"));
+                 $this->startDate = (!empty($startDate)) ? $startDate : $addStartDate;
+                 $this->endDate   = (!empty($endDate)) ? $endDate : $addEndDate;
+            break;
+            case "Twomonths":
+                 $addStartDate =  date("Y-m-d", strtotime(" +7 days"));
+                 $addEndDate =  date("Y-m-d", strtotime(" +2 months"));
+                 $this->startDate = (!empty($startDate)) ? $startDate : $addStartDate;
+                 $this->endDate   = (!empty($endDate)) ? $endDate : $addEndDate;
+            break;
+            case "Fourmonths":
+                 $addDate = date("Y-m-d", strtotime(" +2 months"));
+				 $addStartDate = date('Y-m-d',strtotime($addDate . "+1 days"));
+				 $addEndDate = date("Y-m-d", strtotime($addStartDate . "+4 months"));
+                 $this->startDate = (!empty($startDate)) ? $startDate : $addStartDate;
+                 $this->endDate   = (!empty($endDate)) ? $endDate : $addEndDate;
+            break;
+            case "Sixmonths":
+                 $addDate = date("Y-m-d", strtotime(" +6 months"));
+				 $addStartDate = date('Y-m-d',strtotime($addDate . "+1 days"));
+				 $addEndDate = date("Y-m-d", strtotime($addStartDate . "+6 months"));
+				 $this->startDate = (!empty($startDate)) ? $startDate : $addStartDate;
+                 $this->endDate   = (!empty($endDate)) ? $endDate : $addEndDate;
+            break;
+            case "Custom":
+                 $this->startDate = $startDate;
+                 $this->endDate   = $endDate;
+            break;
+            default:
+                 $this->startDate = (!empty($startDate)) ? $startDate : date("Y-m-d");
+                 $this->endDate   = (!empty($endDate)) ? $endDate : date("Y-m-d");
+           break;
+        }
+    }
+
+     // Get Date Range Types
+    function __getDataCompare($dayRangeType,$result)
+    {
+        print $this->dayRangeType =  $dayRangeType;
+        switch ($this->dayRangeType) {
+			case "Oneday":
+			    return $result;
+			case "Oneweek":
+			    unset($result['CheckedIn']);
+			    unset($result['CheckInTime']);
+			    unset($result['CheckoutTime']);
+			    unset($result['Noshow']);
+			    return $result;
+			case "Twomonths":
+			    unset($result['CheckedIn']);
+			    unset($result['CheckInTime']);
+			    unset($result['CheckoutTime']);
+			    unset($result['Noshow']);
+			    return $result;
+			case "Fourmonths":
+			    unset($result['CheckedIn']);
+			    unset($result['CheckInTime']);
+			    unset($result['CheckoutTime']);
+			    unset($result['Noshow']);
+				return $result;
+			case "Sixmonths":
+			    unset($result['CheckedIn']);
+			    unset($result['CheckInTime']);
+			    unset($result['CheckoutTime']);
+			    unset($result['Noshow']);
+				return $result;
+			default:
+				return $result;
+        }
+    }     
+    /**
+     * Default Index Fn
+     */    
+	public function index(){ print "Test";}
+    
+    
+    /**
+     * This function for get appointments   
+     * @param type $dayRangeType
+     * @param type $startDate
+     * @param type $endDate
+     * @param type $account_no
+     */
+	public function getAppointments($dayRangeType="Oneday",$account_no="",$startDate="",$endDate=""){
+            if($account_no!=''){
+            	$account_no = salonWebappCloudDe($account_no);
+            }
+            $getConfigDetails = $this->Common_model->getMillSdkConfigDetails($account_no);
+			if($getConfigDetails->num_rows()>0){
+				foreach($getConfigDetails->result_array() as $configDetails){
+					pa('',"".$configDetails['salon_name'].' ---['.$configDetails['salon_account_id']."]");
+                    $account_no = $this->salonAccountId = $configDetails['salon_account_id'];
+                    $this->pemFilePath	 =	base_url()."salonevolve.pem";
+                    $this->salonMillIp	 =	$configDetails['mill_ip_address'];
+                    $this->salonMillGuid =	$configDetails['mill_guid'];
+                    $this->salonMillUsername =	$configDetails['mill_username'];
+                    $this->salonMillPassword =	$configDetails['mill_password'];
+                    $this->salonMillSdkUrl = $configDetails['mill_url'];
+                    // Database Log
+                    $log['AccountNo'] = $configDetails['salon_account_id'];
+                    $log['salon_id'] = $configDetails['salon_id'];
+                    $log['StartingTime'] = date('Y-m-d H:i:s');
+                    $log['whichCron'] = 'getAppointments';
+                    $log['CronUrl'] = MAIN_SERVER_URL.'Wsimport_millsdk_appts/getAppointments/'.$dayRangeType.'/'.$account_no;
+                   // $log['CronUrl'] = 'http://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+                    $log['CronType'] = 0;
+                    $log['id'] = 0;
+                    $log_id = $this->Common_model->saveMillCronLogs($log);
+                    $this->__getStartEndDate($dayRangeType,$startDate,$endDate);
+                     //MILLENIUM SDK REQUEST FOR SOAP CALL
+		            $millloginDetails = array('User' => $this->salonMillUsername,'Password' => $this->salonMillPassword);
+		            //echo date_default_timezone_get();
+	                $this->nusoap_library = new Nusoap_library($this->salonMillSdkUrl.'?WSDL','wsdl','','','','');
+	                //echo date_default_timezone_get();
+	                //pa(date('Y-m-d H:i:s'));
+	                $this->millResponseSessionId = $this->nusoap_library->soap_library($this->salonMillSdkUrl,$this->salonMillGuid)->getMillMethodCall('Logon',$millloginDetails);
+	                pa($this->millResponseSessionId,'Session',false);
+                    if($this->millResponseSessionId){
+	                     $millMethodParams = array('StartDate' => $this->startDate,'EndDate' => $this->endDate);
+	                     pa($millMethodParams,'millMethodParams');
+	                     $this->millResponseXml = $this->nusoap_library->getMillMethodCall('GetAllAppointmentsByDate',$millMethodParams);
+	                     $clientsIds = array();
+	                     $allapptIds = array();
+	                     if($account_no==''){
+                            pa('AccountNo Error');
+	                     	exit();
+	                     }
+	                     //pa($this->millResponseXml['Apptointments'],'sdk',false);
+	                     if(isset($this->millResponseXml['Apptointments']))
+								{
+										//COUNT OF APPTS FROM MILL SDK
+									   if(!isset($this->millResponseXml['Apptointments'][0]))  
+			                            {
+			                                 $tempArr = $this->millResponseXml['Apptointments'];
+			                                 unset($this->millResponseXml['Apptointments']);
+			                                 $this->millResponseXml['Apptointments'][0] = $tempArr;
+			                            }
+			                            $countOfAppts = count($this->millResponseXml['Apptointments']);
+									   pa($countOfAppts,'SDKCOUNT',false);
+
+										
+
+			                           // pa($this->millResponseXml['Apptointments'],'data',true);
+
+										foreach($this->millResponseXml['Apptointments'] as $appts)
+										//CONVERTED APPOINTMENTS XML TO ARRAY
+										{
+											//pa($appts);
+											pa('',"Apptointments--".$appts["iid"]); //DEBUGMSG
+											// appointments related
+											//echo 'APPT '.$appts['iid'].'<br>';
+											//exit;
+											if($appts["iid"]==0){
+												pa('appointment id error');
+												exit();
+											}
+											$allapptIds[] = $appts['iid'];
+											// COMPARE DB DATA WITH SERVICE DATA 
+											$date = strtotime($appts['ddate']); 
+											$appointmentDate = date("n/j/Y",$date); 
+											$sdk_status = trim($appts['cconfirmation']); //trim spaces in cconfirmation
+
+											// NEW FIELDS ADDED IN DB TO UPDATE/INSERT MILL CREATED/MODIFIED DATES
+											if(!empty($appts['torigdatetime'])){
+												$salonCreatedDate = explode("T",$appts['torigdatetime']);
+												$salonCreatedDateConcat = $salonCreatedDate[0]." ".$salonCreatedDate[1];
+											} else {
+												$salonCreatedDateConcat = "";
+											}
+
+											if(!empty($appts['tlastmodified'])){
+												$salonModifiedDate = explode("T",$appts['tlastmodified']);
+												$salonModifiedDateConcat = $salonModifiedDate[0]." ".$salonModifiedDate[1];
+											} else {
+												$salonModifiedDateConcat = "";
+											}
+
+											if(!empty($appts['tlastchg'])){
+												$salonLastChangeDate = explode("T",$appts['tlastchg']);
+												$salonLastChangeDateConcat = $salonLastChangeDate[0]." ".$salonLastChangeDate[1];
+											} else {
+												$salonLastChangeDateConcat = "";
+											}
+											
+											if(is_array($appts['ccheckintime'])){
+                                             $ccheckintime = $appts['ccheckintime'][0];
+                                            }else{
+                                             $ccheckintime = $appts['ccheckintime'];	
+                                            }
+                                            
+                                            if(is_array($appts['ccheckouttime'])){
+                                             $ccheckouttime = $appts['ccheckouttime'][0];
+                                            }else{
+                                             $ccheckouttime = $appts['ccheckouttime'];	
+                                            }
+                                            
+                                            if(is_array($appts['cblockdescr'])){
+                                             $cblockdescr = $appts['cblockdescr'][0];
+                                            }else{
+                                             $cblockdescr = $appts['cblockdescr'];	
+                                            }
+                                            if(is_array($appts['ctimeofday'])){
+                                             $ctimeofday = $appts['ctimeofday'][0];
+                                            }else{
+                                             $ctimeofday = $appts['ctimeofday'];	
+                                            }
+                                            $appts['ctimeofday'] = $ctimeofday;
+
+											$mappnotes = !empty($appts['mappnotes']) ? $appts['mappnotes'][0]:"";
+
+											if(is_array($appts['cservice'])){
+                                             $cservice = $appts['cservice'][0];
+                                            }else{
+                                             $cservice = $appts['cservice'];	
+                                            }
+
+                                            $appts['cservice'] = $cservice;
+
+                                            if(preg_match('/"/', $appts['cservice']))
+                                            {    
+                                                $appts['cservice'] = str_replace('"', "", $appts['cservice']);
+                                            } 
+                                            else {
+                                            	$appts['cservice'] = $appts['cservice'];
+                                            }
+
+
+											// GETS APPOINTMENTS DATA FROM DB COMPARING APPT ID
+											$query = $this->DB_ReadOnly->get_where(MILL_APPTS_TABLE, array('AppointmentIID' => $appts['iid'],'AccountNo' => $account_no));
+											$apptsArray = $query->row_array();
+											if(!empty($apptsArray))
+											{
+												if($apptsArray['ApptId']==$appts['iapptid'] 
+													&& $apptsArray['AccountNo']==$account_no 
+													&& $apptsArray['AppointmentTime']==$appts['ctimeofday'] 
+													&& $apptsArray['EmployeeName']==$appts['cempname'] 
+													&& $apptsArray['ClientId']==$appts['iclientid'] 
+													&& $apptsArray['Service']==$appts['cservice']
+													&& $apptsArray['AppointmentDate']==$appointmentDate 
+													&& $apptsArray['TConfirmed']==$appts['tconfirmed']
+													&& $apptsArray['sdk_status']==$sdk_status 
+													&& $apptsArray['MillCreatedDate']==$salonCreatedDateConcat
+													&& $apptsArray['MillLastModifiedDate']==$salonModifiedDateConcat 
+													&& $apptsArray['MillLastChangeDate']==$salonLastChangeDateConcat 
+													&& $apptsArray['Lprebook']==$appts['lprebook']
+													&& $apptsArray['Nstartlen']==$appts['nstartlen']
+													&& $apptsArray['Ngaplen']==$appts['ngaplen']
+													&& $apptsArray['Nfinishlen']==$appts['nfinishlen']
+													&& $apptsArray['CheckedIn']==$appts['lcheckedin']
+													&& $apptsArray['CheckInTime']==$ccheckintime
+													&& $apptsArray['CheckoutTime']==$ccheckouttime
+													&& $apptsArray['Noshow']==$appts['lnoshow']
+													&& $apptsArray['iempid']==$appts['iempid']
+													&& $apptsArray['iservid']==$appts['iservid']
+													&& $apptsArray['BlockId']==$appts['iblockid']
+													&& $apptsArray['BlockDescription']==$cblockdescr
+													&& $apptsArray['MapNotes']==$mappnotes
+													)
+												{
+													//continue; //SAME DATA FOUND, SO CONTINUe with the loop
+												}	
+												else
+												{
+													//UPDATE DATA IN DB 
+													$date = strtotime($appts['ddate']); 
+													$appointmentDate = date("n/j/Y",$date); 
+													$sdk_status = trim($appts['cconfirmation']); //trim spaces in cconfirmation
+													$appointments_data = array(
+														'ApptId' => $appts['iapptid'],
+														'SlcStatus' => 'Updated',
+														'AppointmentDate' => $appointmentDate, //appointment Date
+														'dayRange' => $dayRangeType,
+														'AppointmentTime' => $appts['ctimeofday'],
+														'EmployeeName' => $appts['cempname'],
+														'ClientId' => $appts['iclientid'],
+														'TConfirmed' => $appts['tconfirmed'],
+														'Service' => $appts['cservice'],
+														'ModifiedDate' => date("Y-m-d H:i:s"),
+														'IsProcessed' => 0,
+														'IsProcessedDM' => 0,
+														'sdk_status' => $sdk_status,
+														'MillCreatedDate' => $salonCreatedDateConcat,
+														'MillLastModifiedDate' => $salonModifiedDateConcat,
+														'MillLastChangeDate' => $salonLastChangeDateConcat,
+														'Lprebook' => $appts['lprebook'],
+														'Nstartlen' => $appts['nstartlen'],
+														'Ngaplen' => $appts['ngaplen'],
+														'Nfinishlen' => $appts['nfinishlen'],
+														'CheckedIn' => $appts['lcheckedin'],
+														'CheckInTime' => $ccheckintime,
+														'CheckoutTime' => $ccheckouttime,
+														'Noshow' => $appts['lnoshow'],
+														'iempid' => $appts['iempid'],
+														'iservid' => $appts['iservid'],
+														'BlockId' => $appts['iblockid'],
+														'BlockDescription' => $cblockdescr,
+														'MapNotes' => $mappnotes,
+													);
+
+													if(isset($appts['cclient']) && !empty($appts['cclient'])){
+														$log_clientName = trim($appts['cclient']);
+													} else {
+														$log_clientName = "";
+													}
+
+													$statusUpdate = "Updated ".$appointmentDate." at ".$appts['ctimeofday']." for ".$appts['cservice']." with ".$appts['cempname']." for ".$log_clientName." on ".date("Y-m-d H:i:s")." status ".$sdk_status."\n";
+							                        $this->db->set('appointment_log', 'CONCAT(appointment_log,"'.$statusUpdate.'")', FALSE);
+													$this->db->where('AppointmentIID',$appts['iid']);
+													$this->db->where('AccountNo',$account_no);
+													$res = $this->db->update(MILL_APPTS_TABLE, $appointments_data);
+
+													pa($this->db->last_query(),'Update appts query');
+												}
+											}
+											else // INSERT APPOINTMENT DATA IN DB 
+											{
+												//pa($appts['iid'],'Apptointment Id',false);
+												if($appts['iid']!='0'){
+													$date = strtotime($appts['ddate']); 
+													$appointmentDate = date("n/j/Y",$date); 
+													$sdk_status = trim($appts['cconfirmation']); //trim spaces in cconfirmation
+											    	$appointments_data = array(
+													'AppointmentIID' => $appts['iid'],
+													'dayRange' => $dayRangeType,
+													'SalonId' => 0,
+													'AccountNo' => $account_no,
+													'ApptId' => $appts['iapptid'],
+													'SlcStatus' => 'Inserted',
+													'AppointmentDate' => $appointmentDate, //appointment Date
+													'AppointmentTime' => $appts['ctimeofday'],
+													'EmployeeName' => $appts['cempname'],
+													'WinServiceTypeId' => 0,
+													'ClientId' => $appts['iclientid'],
+													'TConfirmed' => $appts['tconfirmed'],
+													'Service' => $appts['cservice'],
+													'Status' => 1,
+													'IsProcessed' => 0,
+													'IsProcessedDM' => 0,
+													'CrateatedDate' => date("Y-m-d H:i:s"),
+													'ModifiedDate' => date("Y-m-d H:i:s"),
+													'sdk_status' => $sdk_status,
+													'MillCreatedDate' => $salonCreatedDateConcat,
+													'MillLastModifiedDate' => $salonModifiedDateConcat,
+													'MillLastChangeDate' => $salonLastChangeDateConcat,
+													'Lprebook' => $appts['lprebook'],
+													'Nstartlen' => $appts['nstartlen'],
+													'Ngaplen' => $appts['ngaplen'],
+													'Nfinishlen' => $appts['nfinishlen'],
+													'CheckedIn' => $appts['lcheckedin'],
+													'CheckInTime' => $ccheckintime,
+													'CheckoutTime' => $ccheckouttime,
+													'Noshow' => $appts['lnoshow'],
+													'iempid' => $appts['iempid'],
+													'iservid' => $appts['iservid'],
+													'BlockId' => $appts['iblockid'],
+													'BlockDescription' => $cblockdescr,
+													'MapNotes' => $mappnotes,
+												);
+
+											    if(isset($appts['cclient']) && !empty($appts['cclient'])){
+													$log_clientName = trim($appts['cclient']);
+												} else {
+													$log_clientName = "";
+												}
+
+												$statusUpdate = "Inserted ".$appointmentDate." at ".$appts['ctimeofday']." for ".$appts['cservice']." with ".$appts['cempname']." for ".$log_clientName." on ".date("Y-m-d H:i:s")." status ".$sdk_status."\n";
+
+						                        $this->db->set('appointment_log', 'CONCAT(appointment_log,"'.$statusUpdate.'")', FALSE);
+
+												//$res = $this->Appointmentsimport_model->insertMillAppointments($appointments_data);
+												$res = $this->db->insert(MILL_APPTS_TABLE, $appointments_data);
+
+												pa($this->db->last_query(),'Insert appts query');
+
+
+												pa('',"inserted data ---ID=".$res);
+
+												}
+												
+											}
+
+											// appointments related close
+											
+                                            //Fetching Clients
+											$client_id = $appts['iclientid'];
+											pa($client_id,'client Id from sdk',false);
+
+											if(!in_array($client_id,$clientsIds) && $client_id != "-999")//CHECKING DUPLICATION OF CLIENT ID AND 
+									         {
+									         	pa($client_id,'Clients Table Modifications',false);
+									         	$millMethodParams = array('ClientId' => $client_id);
+									         	 pa($millMethodParams,'params');
+                                                $this->millClientResponseXml = $this->nusoap_library->getMillMethodCall('GetClient',$millMethodParams);
+
+                                                pa($this->millClientResponseXml['GetClientResult']['Id'],'ClientIdTest');
+
+                                                if(!isset($this->millClientResponseXml['GetClientResult']['Id'])){
+                                                 	continue;
+                                                } 
+                                                //pa($this->millClientResponseXml,'response');
+                                                $whereConditions =  array('ClientId' => $this->millClientResponseXml['GetClientResult']['Id'],'AccountNo' => $this->salonAccountId);
+												
+						                        $arrClientsdata = $this->Twoyearclientsimport_model
+						                             ->compareMillTwoYearsClients($whereConditions)
+						                             ->row_array();
+                                                $firstVisitDate = (!empty($this->millClientResponseXml['GetClientResult']['FirstVisitDate'])) ? str_replace("T"," ",$this->millClientResponseXml['GetClientResult']['FirstVisitDate']) : '';
+
+												$lastVisitDate = (!empty($this->millClientResponseXml['GetClientResult']['LastVisitDate'])) ? str_replace("T"," ",$this->millClientResponseXml['GetClientResult']['LastVisitDate']) : '';
+
+												$optedInSms = (!empty($this->millClientResponseXml['GetClientResult']['ConfirmViaSMS'])&& $this->millClientResponseXml['GetClientResult']['ConfirmViaSMS']=='true') ? 1:2;
+
+												$optedInEMail = (!empty($this->millClientResponseXml['GetClientResult']['ConfirmViaEmail'])&& $this->millClientResponseXml['GetClientResult']['ConfirmViaSMS']=='true') ? 1:2;
+
+												$mobilePhoneNo = (!empty($this->millClientResponseXml['GetClientResult']['CellPhoneNumber'])) ? $this->millClientResponseXml['GetClientResult']['CellPhoneNumber']:0;
+
+
+												$comparearray = array();
+												$comparearray['Email'] = $this->millClientResponseXml['GetClientResult']['EmailAddress'];
+												$comparearray['Zip'] = $this->millClientResponseXml['GetClientResult']['ZipCode'];
+												$comparearray['Phone'] = $this->millClientResponseXml['GetClientResult']['HomeAreaCode'].$this->millClientResponseXml['GetClientResult']['HomePhoneNumber'];
+												$comparearray['Name'] = $this->millClientResponseXml['GetClientResult']['FirstName'].' '.$this->millClientResponseXml['GetClientResult']['LastName'];
+												$comparearray['Dob'] = $this->millClientResponseXml['GetClientResult']['Birthday'];
+												$comparearray['Sex'] = $this->millClientResponseXml['GetClientResult']['Sex'];
+												$comparearray['Mobile'] = $this->millClientResponseXml['GetClientResult']['CellPhoneNumber'];
+												//$comparearray['Mobile'] = '';
+												$comparearray['MobileAreaCode'] = $this->millClientResponseXml['GetClientResult']['CellAreaCode'];
+												$comparearray['BusinessAreaCode'] = $this->millClientResponseXml['GetClientResult']['BusinessAreaCode'];
+												$comparearray['BusinessPhoneNumber'] = $this->millClientResponseXml['GetClientResult']['BusinessPhoneNumber'];
+												$comparearray['clientFirstVistedDate'] = $firstVisitDate;
+												$comparearray['clientLastVistedDate'] = $lastVisitDate;
+												$comparearray['opted_in_email'] = $optedInEMail;
+												$comparearray['opted_in_sms'] = $optedInSms;
+												//$comparearray['IsProcessed']=0;
+                                                //pa($comparearray,'comparearray');
+                                                 if(!empty($arrClientsdata))
+								                    {
+								                       $diff_array = array_diff_assoc($comparearray, $arrClientsdata);
+								                       pa($diff_array,"Diff Array");
+								                       if(empty($diff_array))
+								                        {
+								                            pa('No Updates Clients Table');
+								                        }else
+								                        {
+								                        	$diff_array['ModifiedDate'] = date("Y-m-d H:i:s");
+
+								                        	$diff_array['IsProcessed'] = 0;
+
+								                        	$diff_array['IsProcessedDM'] = 0;
+								                            //$diff_array['SlcStatus'] = 1;
+
+								                            pa($diff_array,'Clients diff');
+
+								                            $whereconditions = array();
+
+															$whereconditions['ClientId'] = $this->millClientResponseXml['GetClientResult']['Id'];
+
+															$whereconditions['AccountNo'] = $this->salonAccountId;
+
+															//$this->Twoyearclientsimport_model->updateMillTwoYearsClients($whereconditions,$diff_array);
+
+															if(!empty($comparearray['Email'])){
+														 		$hasEmail = " with Email ".$comparearray['Email'];
+														 	} else {
+														 		$hasEmail = " without Email";
+														 	}
+
+														 	if(!empty($mobilePhoneNo)){
+														 		$hasPhone = " with Phone ".$mobilePhoneNo;
+														 	} else {
+														 		$hasPhone = " without Phone";
+														 	}
+
+														 	$statusUpdate = "Updated Client Id ".$client_id.$hasEmail." and".$hasPhone." and Opted in email ".$optedInEMail." and ".$optedInSms." on ".date("Y-m-d H:i:s")."\n";
+															$this->db->set('client_log', 'CONCAT(client_log,"'.$statusUpdate.'")', FALSE);
+
+												            $this->db->where('ClientId',$whereconditions['ClientId']);
+															$this->db->where('AccountNo',$whereconditions['AccountNo']);
+															$update_query =  $this->db->update(MILL_CLIENTS_TABLE, $diff_array);
+								                        }	
+								                    }else{
+															$comparearray['ClientId'] =  $this->millClientResponseXml['GetClientResult']['Id'];
+															$comparearray['AccountNo'] = $this->salonAccountId;
+															$comparearray['CreatedDate'] = date("Y-m-d H:i:s");
+															$comparearray['ModifiedDate'] = date("Y-m-d H:i:s");
+
+															$comparearray['IsProcessed'] = 0;
+
+								                        	$comparearray['IsProcessedDM'] = 0;
+
+															//$comparearray['SlcStatus'] = 1;
+								                       
+														    //$res = $this->Twoyearclientsimport_model->insertMillTwoYearsClients($comparearray);
+														    if(!empty($comparearray['Email'])){
+														 		$hasEmail = " with Email ".$comparearray['Email'];
+														 	} else {
+														 		$hasEmail = " without Email ";
+														 	}
+
+														 	if(!empty($mobilePhoneNo)){
+														 		$hasPhone = " with Phone ".$mobilePhoneNo;
+														 	} else {
+														 		$hasPhone = " without Phone ";
+														 	}
+
+														 	$statusUpdate = "Inserted Client Id ".$client_id.$hasEmail." and ".$hasPhone." and Opted in email ".$optedInEMail." and ".$optedInSms." on ".date("Y-m-d H:i:s")."\n";
+															$this->db->set('client_log', 'CONCAT(client_log,"'.$statusUpdate.'")', FALSE);
+												             
+												            $insert_query = $this->db->insert(MILL_CLIENTS_TABLE, $comparearray);
+
+														    $clients_id = $this->db->insert_id();
+														    pa('',"Clients Inserted data ---ID=".$clients_id);
+													}
+											  }
+										}
+										if(!empty($allapptIds))
+										{
+											pa($allapptIds,'allapptIds',false);
+											//TO SEARCH EXISTING APPOINTMENTS WITH NEW APPOINTMENTS
+											$whereconditions = array('AccountNo'=>$this->salonAccountId,'startDate'=>$this->startDate,'endDate'=>$this->endDate);
+											$allApptsqueryArray = $this->Appointmentsimport_model
+											                 ->checkAppointmentsToModify($whereconditions)
+											                 ->result_array();
+											foreach($allApptsqueryArray as $allApptId)
+											{
+												$allDBapptIds[] =  $allApptId['AppointmentIID'];
+											}
+											pa($allDBapptIds,'db appointments');
+											$diff_array_appointments = array();
+											$diff_array_appointments = array_diff($allDBapptIds,$allapptIds);
+											//pa($result,'result',true);
+											if(!empty($diff_array_appointments))
+											{
+												foreach($diff_array_appointments as $aptId)
+												{
+													$dataArr = array(
+														'Status' => 0,
+														'SlcStatus' => 'Deleted',
+														'dayRange' => $dayRangeType,
+														'CancelledOn' => date("Y-m-d H:i:s"),
+														'IsProcessed' => 0,
+														'IsProcessedDM' => 0,
+													);
+													$whereconditions = array('AppointmentIID'=>$aptId,
+														                     'AccountNo'=>$this->salonAccountId,
+														                     'startDate'=>$this->startDate,
+														                     'endDate'=>$this->endDate);
+													$update = $this->Appointmentsimport_model
+													          ->updateCancelledAppointments($whereconditions,$dataArr);
+													pa($aptId,"Update Cancel Apptointment Id -$aptId");
+												}
+											}
+										}		
+						        }else{	//APPTS not found in MILL
+				  				          echo "No Appts found in MILL."."<br>";
+								}
+						 // Database Log
+						 $log['id'] = $log_id;
+                         $log_id = $this->Common_model->saveMillCronLogs($log);
+				   }else{
+				   	     echo "SESSION NOT SET";
+				   }	
+				}
+ 			}else{
+ 				pa('Salons are inactive or invalid salon');
+ 			}
+     	}
+    /**
+     This function for set appointments checkedin and checkedout
+    */
+    public function appointmentsCheckedIn($account_no="",$startDate="",$endDate=""){
+    	$encoded_accountno = $account_no;
+    	if($account_no!=''){
+          	$account_no = salonWebappCloudDe($account_no);
+        }
+    	$getConfigDetails = $this->Common_model->getMillSdkConfigDetails($account_no);
+		if($getConfigDetails->num_rows()>0){
+		 	foreach($getConfigDetails->result_array() as $configDetails){
+		 		pa('',"".$configDetails['salon_name'].' ---['.$configDetails['salon_account_id']."]");
+		 		    $this->salonAccountId = $configDetails['salon_account_id'];
+                    $this->pemFilePath	 =	base_url()."salonevolve.pem";
+                    $this->salonMillIp	 =	$configDetails['mill_ip_address'];
+                    $this->salonMillGuid =	$configDetails['mill_guid'];
+                    $this->salonMillUsername =	$configDetails['mill_username'];
+                    $this->salonMillPassword =	$configDetails['mill_password'];
+                    $this->salonMillSdkUrl = $configDetails['mill_url'];
+                    // Database Log
+                    $log['AccountNo'] = $configDetails['salon_account_id'];
+                    $log['salon_id'] = $configDetails['salon_id'];
+                    $log['StartingTime'] = date('Y-m-d H:i:s');
+                    $log['whichCron'] = 'appointmentsCheckedIn';
+                    //$log['CronUrl'] = 'http://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+                    $log['CronUrl'] = MAIN_SERVER_URL.'Wsimport_millsdk_appts/appointmentsCheckedIn/'.$encoded_accountno;
+                    $log['CronType'] = 0;
+                    $log['id'] = 0;
+                    $log_id = $this->Common_model->saveMillCronLogs($log);
+                     //MILLENIUM SDK REQUEST FOR SOAP CALL
+		            $millloginDetails = array('User' => $this->salonMillUsername,'Password' => $this->salonMillPassword);
+	                $this->nusoap_library = new Nusoap_library($this->salonMillSdkUrl.'?WSDL','wsdl','','','','');
+	                $this->millResponseSessionId = $this->nusoap_library->soap_library($this->salonMillSdkUrl,$this->salonMillGuid)->getMillMethodCall('Logon',$millloginDetails);
+	                pa($this->millResponseSessionId,'Session',false);
+                    if($this->millResponseSessionId){
+                    	$this->startDate = (!empty($startDate)) ? $startDate : date("Y-m-d");
+                        $this->endDate   = (!empty($endDate)) ? $endDate : date("Y-m-d");
+                        $millMethodParams = array('StartDate' => $this->startDate,'EndDate' => $this->endDate);
+	                    pa($millMethodParams,'millMethodParams');
+	                    $this->millResponseXml = $this->nusoap_library->getMillMethodCall('GetAllAppointmentsByDate',$millMethodParams);
+	                    if(isset($this->millResponseXml['Apptointments'])){
+	                    	$countOfAppts = count($this->millResponseXml['Apptointments']);
+	                    	foreach($this->millResponseXml['Apptointments'] as $aPts){
+	                    		$is_checked_in = trim($aPts['lcheckedin']);
+	                    		pa($is_checked_in,'is_checked_in');
+	                    		if($is_checked_in=='true'){
+	                    			$wherecondition = array('AppointmentIID'=>$aPts['iid'],
+	                    				                    'AccountNo' =>$this->salonAccountId,
+	                    				                    'CheckedIn'=>'false');
+	                    			$apptsArray = $this->Appointmentsimport_model
+	                    			             ->compareAppointments($wherecondition)
+	                    			             ->row_array();
+	                    			if(!empty($apptsArray)){
+
+	                    				if(is_array($aPts['ccheckintime'])){
+											 $CheckInTime = $aPts['ccheckintime'][0];
+											}else{
+											 $CheckInTime = $aPts['ccheckintime'];	
+											}
+
+									    pa($aPts['ccheckintime'],'CheckedIn');	
+									    	
+	                    				$appointments_data = array(
+											'ModifiedDate' => date("Y-m-d H:i:s"),
+											'IsProcessed' => 0,
+											'IsProcessedDM' => 0,
+											'CheckedIn' => $aPts['lcheckedin'],
+											'CheckInTime' => $CheckInTime
+										);
+										$whereconditions = array('AppointmentIID'=>$aPts['iid'],'AccountNo'=>$this->salonAccountId);
+										$update = $this->Appointmentsimport_model
+										          ->updateCheckedInAppointments($whereconditions,$appointments_data);
+										$apptsiid = $aPts['iid'];          
+										pa($apptsiid,"Appointments ID $apptsiid  Updated");   
+	                    			}             
+	                    		}
+	                    	}
+	                    	//SEND PUSH NOTIFICATION
+							$currentDate = date("Y-m-d");
+							$this->DB_ReadOnly->select("Id,ApptId,AccountNo,ClientId,iempid,Service,AppointmentDate,AppointmentTime");
+							$this->DB_ReadOnly->where("STR_TO_DATE(AppointmentDate, '%m/%d/%Y') =", $currentDate);
+							$this->DB_ReadOnly->where("CheckedIn", "true");
+							$this->DB_ReadOnly->where("SlcStatus !=", "Deleted");
+							$this->DB_ReadOnly->where("ClientId !=", "-999");
+							$this->DB_ReadOnly->where("is_checked_in_push_sent =", 0);
+							$this->DB_ReadOnly->where("AccountNo", $account_no);
+							
+							$this->DB_ReadOnly->group_by("ClientId,iempid");
+                            $this->DB_ReadOnly->order_by("AppointmentTime",'ASC');
+							$allApptsquery = $this->DB_ReadOnly->get(MILL_APPTS_TABLE);
+							$allApptsqueryArray = $allApptsquery->result_array();
+							pa($this->DB_ReadOnly->last_query());
+							//print_r($allApptsqueryArray);exit;
+							
+							$postDataArr = array();
+							$tempArr = array();
+
+							if(!empty($allApptsqueryArray)){
+								foreach($allApptsqueryArray as $checkedInAppts){
+									
+									if(isset($checkedInAppts["ClientId"]) && !empty($checkedInAppts["ClientId"])){
+
+										$this->DB_ReadOnly->select("Name");
+										$query = $this->DB_ReadOnly->get_where(MILL_CLIENTS_TABLE, array('ClientId' => $checkedInAppts["ClientId"],'AccountNo' => $checkedInAppts["AccountNo"]),1);
+										//$this->db->limit(1);
+										$clientsData = $query->row_array();
+										
+										if(isset($clientsData["Name"]) && !empty($clientsData["Name"])){
+											$clientName = $clientsData["Name"];
+										}else {
+											$clientName = "";
+										}
+									} else {
+										$clientsData = array();
+										$clientName = "";
+									}
+
+									
+									$tempArr["Id"] = $checkedInAppts["Id"];
+									$tempArr["ApptId"] = $checkedInAppts["ApptId"];
+									$tempArr["AccountNo"] = $checkedInAppts["AccountNo"];
+									$tempArr["client_name"] = $clientName;
+									$tempArr["iempid"] = $checkedInAppts["iempid"];
+									$tempArr["ClientId"] = $checkedInAppts["ClientId"];
+									$tempArr["Service"] = $checkedInAppts["Service"];
+									$tempArr["AppointmentDate"] = $checkedInAppts["AppointmentDate"];
+									$tempArr["AppointmentTime"] = $checkedInAppts["AppointmentTime"];
+									
+									$postDataArr["checked_in_appts"][] = $tempArr; 
+
+									$this->db->where(array("AccountNo" => $checkedInAppts["AccountNo"], 'ClientId' => $checkedInAppts["ClientId"], "str_to_date(`AppointmentDate`, '%m/%d/%Y') = " => $currentDate));
+									$this->db->update(MILL_APPTS_TABLE, array(
+										"is_checked_in_push_sent" => 1,
+										"checked_in_push_send_date" => date("Y-m-d H:i:s"),
+										"IsProcessed" => 0,
+										'IsProcessedDM' => 0,
+										)
+										
+									);
+								}
+							} else {
+								$postDataArr["checked_in_appts"] = array();
+							}
+
+						   //print_r($postDataArr);exit;
+											
+							$jsonPostData = json_encode($postDataArr);
+							pa($jsonPostData,'jsonPostData',false);
+							//pa($jsonPostData,'jsonPostData',true);
+							//exit;
+							$ch = curl_init();
+							curl_setopt($ch, CURLOPT_URL,"https://saloncloudsplus.com/wsserviceandretailreports/sendCheckedInNotification");
+							curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+							curl_setopt($ch, CURLOPT_POST, 1);
+							curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPostData);
+							curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json')); 
+							$checkedInApptsResponse=curl_exec($ch);
+							curl_close($ch);
+							echo $checkedInApptsResponse."<br>";
+							echo "Checked in has sent Successfully"."<br>";
+
+	                    }else{
+	                    	pa('No Apptointments');
+	                    }
+
+                    }else{
+                    	pa('Session Not Set');
+                    }
+                    $log['id'] = $log_id;
+                    $log_id = $this->Common_model->saveMillCronLogs($log);
+	
+		 	}
+		 }else{
+		 	pa('No Salon Details');
+		 }
+    } 	
+  
+   
+ }
